@@ -222,59 +222,71 @@ const Store = (() => {
 
 const GithubSync = (() => {
   let _pushing = false;
+  const REPO = 'samcbarth/runmywork';
 
   function getConfig() {
-    try { return JSON.parse(localStorage.getItem(Store.KEYS.githubCfg) || '{}'); }
-    catch { return {}; }
+    try {
+      const stored = JSON.parse(localStorage.getItem(Store.KEYS.githubCfg) || '{}');
+      return { pat: stored.pat || '', repo: stored.repo || REPO };
+    } catch { return { pat: '', repo: REPO }; }
   }
 
   function saveConfig(pat, repo) {
-    localStorage.setItem(Store.KEYS.githubCfg, JSON.stringify({ pat, repo }));
+    localStorage.setItem(Store.KEYS.githubCfg, JSON.stringify({ pat, repo: repo || REPO }));
   }
 
   function isConfigured() {
-    const { pat, repo } = getConfig();
-    return !!(pat && repo);
+    return !!getConfig().pat;
   }
 
   function _sha() { return localStorage.getItem(Store.KEYS.githubSha) || null; }
   function _setSha(sha) { localStorage.setItem(Store.KEYS.githubSha, sha); }
 
-  function _b64encode(str) {
-    return btoa(unescape(encodeURIComponent(str)));
-  }
+  function _b64encode(str) { return btoa(unescape(encodeURIComponent(str))); }
+  function _b64decode(str) { return decodeURIComponent(escape(atob(str.replace(/\s/g, '')))); }
 
-  function _b64decode(str) {
-    return decodeURIComponent(escape(atob(str.replace(/\s/g, ''))));
+  function _applyData(data, sha) {
+    if (sha) _setSha(sha);
+    if (Array.isArray(data.projects)) {
+      localStorage.setItem(Store.KEYS.projects, JSON.stringify(data.projects));
+    }
+    if (data.settings) {
+      // Bootstrap PAT onto this device if found in data.json
+      if (data.settings.githubPat) {
+        saveConfig(data.settings.githubPat, data.settings.githubRepo || REPO);
+      }
+      const local = Store.getSettings();
+      Store.saveSettings({
+        ...local,
+        ntfyTopic:  data.settings.ntfyTopic  || local.ntfyTopic  || '',
+        thresholds: data.settings.thresholds || local.thresholds
+      });
+    }
   }
 
   async function pull() {
-    const { pat, repo } = getConfig();
-    if (!pat || !repo) return { ok: false, reason: 'not-configured' };
-
+    const { repo } = getConfig();
+    // Always try unauthenticated first — works for public repos, bootstraps PAT on new devices
     try {
-      const res = await fetch(
-        `https://api.github.com/repos/${repo}/contents/data.json`,
-        { headers: { Authorization: `token ${pat}`, Accept: 'application/vnd.github.v3+json' } }
-      );
+      const res = await fetch(`https://api.github.com/repos/${repo}/contents/data.json`,
+        { headers: { Accept: 'application/vnd.github.v3+json' } });
+      if (res.ok) {
+        const file = await res.json();
+        _applyData(JSON.parse(_b64decode(file.content)), file.sha);
+        return { ok: true };
+      }
+    } catch { /* fall through to authenticated */ }
+
+    // Fall back to authenticated pull
+    const { pat } = getConfig();
+    if (!pat) return { ok: false, reason: 'not-configured' };
+    try {
+      const res = await fetch(`https://api.github.com/repos/${repo}/contents/data.json`,
+        { headers: { Authorization: `token ${pat}`, Accept: 'application/vnd.github.v3+json' } });
       if (res.status === 404) return { ok: false, reason: 'not-found' };
       if (!res.ok) return { ok: false, reason: `http-${res.status}` };
-
       const file = await res.json();
-      const data = JSON.parse(_b64decode(file.content));
-      _setSha(file.sha);
-
-      if (Array.isArray(data.projects)) {
-        localStorage.setItem(Store.KEYS.projects, JSON.stringify(data.projects));
-      }
-      if (data.settings) {
-        const local = Store.getSettings();
-        Store.saveSettings({
-          ...local,
-          ntfyTopic:  data.settings.ntfyTopic  ?? local.ntfyTopic,
-          thresholds: data.settings.thresholds ?? local.thresholds
-        });
-      }
+      _applyData(JSON.parse(_b64decode(file.content)), file.sha);
       return { ok: true };
     } catch (e) {
       return { ok: false, reason: e.message };
@@ -284,7 +296,7 @@ const GithubSync = (() => {
   async function push() {
     if (_pushing) return { ok: false, reason: 'busy' };
     const { pat, repo } = getConfig();
-    if (!pat || !repo) return { ok: false, reason: 'not-configured' };
+    if (!pat) return { ok: false, reason: 'not-configured' };
 
     _pushing = true;
     try {
@@ -293,7 +305,9 @@ const GithubSync = (() => {
         projects: Store.getProjects(),
         settings: {
           ntfyTopic:  settings.ntfyTopic  || '',
-          thresholds: settings.thresholds || {}
+          thresholds: settings.thresholds || {},
+          githubPat:  pat,        // stored here so other devices bootstrap automatically
+          githubRepo: repo
         },
         syncedAt: Date.now()
       };

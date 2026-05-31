@@ -151,12 +151,11 @@ const App = (() => {
     _registerSW();
     setTimeout(() => Notifications.checkOnOpen(), 1500);
 
-    // Pull latest data from GitHub before rendering
-    if (GithubSync.isConfigured()) {
-      showSyncStatus('pulling');
-      const result = await GithubSync.pull();
-      showSyncStatus(result.ok ? 'ok' : 'error');
-    }
+    // Always pull — unauthenticated read works on public repos,
+    // bootstraps PAT + data on any new device automatically
+    showSyncStatus('pulling');
+    const result = await GithubSync.pull();
+    showSyncStatus(result.ok ? 'ok' : 'error');
 
     _handleRoute();
   }
