@@ -305,7 +305,7 @@ const GithubSync = (() => {
     }
   }
 
-  async function push(_retry = false) {
+  async function push() {
     if (_pushing) return { ok: false, reason: 'busy' };
     const { pat, repo } = getConfig();
     if (!pat) return { ok: false, reason: 'not-configured' };
@@ -324,7 +324,21 @@ const GithubSync = (() => {
         syncedAt: Date.now()
       };
       const content = _b64encode(JSON.stringify(data, null, 2));
-      const sha = _sha();
+
+      // Always fetch current SHA fresh from GitHub right before writing
+      let sha = null;
+      try {
+        const getRes = await _fetchWithTimeout(
+          `https://api.github.com/repos/${repo}/contents/data.json`,
+          { headers: { Authorization: `token ${pat}`, Accept: 'application/vnd.github.v3+json' } }
+        );
+        if (getRes.ok) {
+          const file = await getRes.json();
+          sha = file.sha;
+          _setSha(sha);
+          _applyData(JSON.parse(_b64decode(file.content)), sha);
+        }
+      } catch { /* file may not exist yet — push without SHA to create it */ }
 
       const res = await _fetchWithTimeout(
         `https://api.github.com/repos/${repo}/contents/data.json`,
@@ -342,13 +356,6 @@ const GithubSync = (() => {
           })
         }
       );
-
-      if (res.status === 409) {
-        if (_retry) { _pushing = false; return { ok: false, reason: '409: SHA conflict — reload and try again' }; }
-        _pushing = false;
-        await pull();
-        return push(true);
-      }
 
       if (!res.ok) {
         const errBody = await res.json().catch(() => ({}));
