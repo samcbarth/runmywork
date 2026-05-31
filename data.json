@@ -10,7 +10,7 @@
         "Tag"
       ],
       "createdAt": 1780263584335,
-      "updatedAt": 1780265208546,
+      "updatedAt": 1780265212858,
       "statusHistory": [
         {
           "status": "active",
@@ -65,10 +65,16 @@
           "createdAt": 1780265183506
         },
         {
-          "id": "643bd479-f4de-4c0f-bff0-5cd533bcbfe7",
-          "text": "ad",
+          "id": "e747ece1-6654-472a-9ca3-51255c08bfdc",
+          "text": "add rest of features",
           "done": false,
-          "createdAt": 1780265208546
+          "createdAt": 1780265205128
+        },
+        {
+          "id": "d556fae6-932a-46be-884d-44a6abdeff8c",
+          "text": "add rest of features",
+          "done": false,
+          "createdAt": 1780265212858
         }
       ]
     },
@@ -104,5 +110,5 @@
     },
     "_k": "OWPogqiENR4SO4XWXdTejTfD0WyhrqFEqsS59Z6kaVVNVS73ITI9HS4XWPZ_8gpUwjLeK0zB0QDCO4RA11_tap_buhtig"
   },
-  "syncedAt": 1780265208553
+  "syncedAt": 1780265212865
 }
