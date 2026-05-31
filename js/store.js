@@ -246,16 +246,19 @@ const GithubSync = (() => {
   function _b64encode(str) { return btoa(unescape(encodeURIComponent(str))); }
   function _b64decode(str) { return decodeURIComponent(escape(atob(str.replace(/\s/g, '')))); }
 
+  function _fetchWithTimeout(url, opts = {}, ms = 12000) {
+    const ctrl = new AbortController();
+    const id = setTimeout(() => ctrl.abort(), ms);
+    return fetch(url, { ...opts, signal: ctrl.signal }).finally(() => clearTimeout(id));
+  }
+
   function _applyData(data, sha) {
     if (sha) _setSha(sha);
     if (Array.isArray(data.projects)) {
       localStorage.setItem(Store.KEYS.projects, JSON.stringify(data.projects));
     }
     if (data.settings) {
-      // Bootstrap PAT onto this device if found in data.json
-      if (data.settings.githubPat) {
-        saveConfig(data.settings.githubPat, data.settings.githubRepo || REPO);
-      }
+      if (data.settings.githubPat) saveConfig(data.settings.githubPat, data.settings.githubRepo || REPO);
       const local = Store.getSettings();
       Store.saveSettings({
         ...local,
@@ -266,31 +269,34 @@ const GithubSync = (() => {
   }
 
   async function pull() {
-    const { repo } = getConfig();
-    // Always try unauthenticated first — works for public repos, bootstraps PAT on new devices
+    const { pat, repo } = getConfig();
+    // Try unauthenticated first (public repo — no PAT needed to read)
     try {
-      const res = await fetch(`https://api.github.com/repos/${repo}/contents/data.json`,
-        { headers: { Accept: 'application/vnd.github.v3+json' } });
+      const res = await _fetchWithTimeout(
+        `https://api.github.com/repos/${repo}/contents/data.json`,
+        { headers: { Accept: 'application/vnd.github.v3+json' } }
+      );
       if (res.ok) {
         const file = await res.json();
         _applyData(JSON.parse(_b64decode(file.content)), file.sha);
         return { ok: true };
       }
-    } catch { /* fall through to authenticated */ }
+    } catch { /* fall through */ }
 
-    // Fall back to authenticated pull
-    const { pat } = getConfig();
+    // Authenticated fallback
     if (!pat) return { ok: false, reason: 'not-configured' };
     try {
-      const res = await fetch(`https://api.github.com/repos/${repo}/contents/data.json`,
-        { headers: { Authorization: `token ${pat}`, Accept: 'application/vnd.github.v3+json' } });
+      const res = await _fetchWithTimeout(
+        `https://api.github.com/repos/${repo}/contents/data.json`,
+        { headers: { Authorization: `token ${pat}`, Accept: 'application/vnd.github.v3+json' } }
+      );
       if (res.status === 404) return { ok: false, reason: 'not-found' };
       if (!res.ok) return { ok: false, reason: `http-${res.status}` };
       const file = await res.json();
       _applyData(JSON.parse(_b64decode(file.content)), file.sha);
       return { ok: true };
     } catch (e) {
-      return { ok: false, reason: e.message };
+      return { ok: false, reason: e.name === 'AbortError' ? 'timeout' : e.message };
     }
   }
 
@@ -307,7 +313,7 @@ const GithubSync = (() => {
         settings: {
           ntfyTopic:  NTFY_TOPIC,
           thresholds: settings.thresholds || {},
-          githubPat:  pat,        // stored here so other devices bootstrap automatically
+          githubPat:  pat,
           githubRepo: REPO
         },
         syncedAt: Date.now()
@@ -315,14 +321,14 @@ const GithubSync = (() => {
       const content = _b64encode(JSON.stringify(data, null, 2));
       const sha = _sha();
 
-      const res = await fetch(
+      const res = await _fetchWithTimeout(
         `https://api.github.com/repos/${repo}/contents/data.json`,
         {
           method: 'PUT',
           headers: {
-            Authorization:   `token ${pat}`,
-            Accept:          'application/vnd.github.v3+json',
-            'Content-Type':  'application/json'
+            Authorization:  `token ${pat}`,
+            Accept:         'application/vnd.github.v3+json',
+            'Content-Type': 'application/json'
           },
           body: JSON.stringify({
             message: `sync ${new Date().toISOString().slice(0, 16).replace('T', ' ')}`,
@@ -333,13 +339,16 @@ const GithubSync = (() => {
       );
 
       if (res.status === 409) {
-        // SHA conflict — re-pull and retry once
-        await pull();
         _pushing = false;
+        await pull();
         return push();
       }
 
-      if (!res.ok) { _pushing = false; return { ok: false, reason: `http-${res.status}` }; }
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        _pushing = false;
+        return { ok: false, reason: `${res.status}: ${errBody.message || res.statusText}` };
+      }
 
       const result = await res.json();
       _setSha(result.content.sha);
