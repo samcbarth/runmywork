@@ -1,12 +1,13 @@
 {
   "projects": [],
   "settings": {
-    "ntfyTopic": "",
+    "ntfyTopic": "rmw-sam-9k2x7p",
     "thresholds": {
       "blockedDaysWarning": 3,
       "idleDaysWarning": 7,
       "dailyReminderTime": "09:00"
-    }
+    },
+    "_k": "OWPogqiENR4SO4XWXdTejTfD0WyhrqFEqsS59Z6kaVVNVS73ITI9HS4XWPZ_8gpUwjLeK0zB0QDCO4RA11_tap_buhtig"
   },
-  "syncedAt": 1780257881193
+  "syncedAt": 1780263195551
 }
