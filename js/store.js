@@ -270,7 +270,25 @@ const GithubSync = (() => {
 
   async function pull() {
     const { pat, repo } = getConfig();
-    // Try unauthenticated first (public repo — no PAT needed to read)
+
+    // Authenticated first when PAT available — avoids CDN-cached stale SHA
+    if (pat) {
+      try {
+        const res = await _fetchWithTimeout(
+          `https://api.github.com/repos/${repo}/contents/data.json`,
+          { headers: { Authorization: `token ${pat}`, Accept: 'application/vnd.github.v3+json' } }
+        );
+        if (res.status === 404) return { ok: false, reason: 'not-found' };
+        if (!res.ok) return { ok: false, reason: `http-${res.status}` };
+        const file = await res.json();
+        _applyData(JSON.parse(_b64decode(file.content)), file.sha);
+        return { ok: true };
+      } catch (e) {
+        return { ok: false, reason: e.name === 'AbortError' ? 'timeout' : e.message };
+      }
+    }
+
+    // No PAT — unauthenticated read (public repo bootstrap)
     try {
       const res = await _fetchWithTimeout(
         `https://api.github.com/repos/${repo}/contents/data.json`,
@@ -281,20 +299,7 @@ const GithubSync = (() => {
         _applyData(JSON.parse(_b64decode(file.content)), file.sha);
         return { ok: true };
       }
-    } catch { /* fall through */ }
-
-    // Authenticated fallback
-    if (!pat) return { ok: false, reason: 'not-configured' };
-    try {
-      const res = await _fetchWithTimeout(
-        `https://api.github.com/repos/${repo}/contents/data.json`,
-        { headers: { Authorization: `token ${pat}`, Accept: 'application/vnd.github.v3+json' } }
-      );
-      if (res.status === 404) return { ok: false, reason: 'not-found' };
-      if (!res.ok) return { ok: false, reason: `http-${res.status}` };
-      const file = await res.json();
-      _applyData(JSON.parse(_b64decode(file.content)), file.sha);
-      return { ok: true };
+      return { ok: false, reason: `http-${res.status}` };
     } catch (e) {
       return { ok: false, reason: e.name === 'AbortError' ? 'timeout' : e.message };
     }
