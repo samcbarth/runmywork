@@ -4,8 +4,8 @@ Views.Dashboard = (() => {
   let _filter = 'all';
 
   function render() {
-    Store.runAutoIdleDetection();
-    const projects = Store.getProjects();
+    const { projects, newlyIdle } = Store.runAutoIdleDetection();
+    newlyIdle.forEach(p => Notifications.ping(p.title, 'Auto-detected idle — no recent activity', 'default'));
     const root = document.getElementById('view-root');
 
     const counts = {

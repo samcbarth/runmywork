@@ -165,6 +165,8 @@ Views.SessionModal = (() => {
     App.stopGlobalTimer();
     App.closeModal();
     _refreshCurrent();
+    const _p = Store.getProject(_projectId);
+    if (_p) Notifications.ping(_p.title, `${durationMinutes} min logged${note ? ' — ' + note : ''}`, 'default');
   }
 
   function _stopFromAnywhere() {
@@ -185,6 +187,8 @@ Views.SessionModal = (() => {
         manual: false
       };
       Store.addSession(session.projectId, sessionRecord);
+      const _p = Store.getProject(session.projectId);
+      if (_p) Notifications.ping(_p.title, `${durationMinutes} min logged`, 'default');
     }
 
     Store.clearActiveSession();
@@ -227,6 +231,9 @@ Views.SessionModal = (() => {
     Store.addSession(_projectId, sessionRecord);
     App.closeModal();
     _refreshCurrent();
+    const _p = Store.getProject(_projectId);
+    const _mins = durationMinutes;
+    if (_p) Notifications.ping(_p.title, `${_mins} min logged${note ? ' — ' + note : ''}`, 'default');
   }
 
   function _startDisplayTimer(startedAt) {

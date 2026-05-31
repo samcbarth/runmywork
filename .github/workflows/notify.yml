@@ -1,8 +1,8 @@
-name: Daily project notifications
+name: Project notifications
 
 on:
   schedule:
-    - cron: '0 14 * * *'  # 9am EST daily
+    - cron: '0 * * * *'  # every hour
   workflow_dispatch:
 
 jobs:

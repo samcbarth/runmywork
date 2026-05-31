@@ -6,7 +6,7 @@ const Notifications = (() => {
     const now = Date.now();
     if (now - (settings.lastNotificationCheck || 0) < 3600000) return;
 
-    const projects = Store.runAutoIdleDetection();
+    const { projects } = Store.runAutoIdleDetection();
     const notifiable = Models.getNotifiableProjects(projects, settings);
     if (notifiable.length === 0) return;
 
@@ -36,12 +36,15 @@ const Notifications = (() => {
         else new Notification(project.title, opts);
       } catch { /* silent */ }
 
-      // Also ping ntfy so it works even when app is closed
       _sendNtfy(project.title, body, project.status === 'blocked' ? 'high' : 'default').catch(() => {});
     }
 
     settings.lastNotificationCheck = now;
     Store.saveSettings(settings);
+  }
+
+  function ping(title, body, priority) {
+    _sendNtfy(title, body, priority).catch(() => {});
   }
 
   async function _sendNtfy(title, body, priority) {
@@ -75,5 +78,5 @@ const Notifications = (() => {
     } catch { /* not supported */ }
   }
 
-  return { checkOnOpen, requestPermission, tryRegisterPeriodicSync };
+  return { checkOnOpen, ping, requestPermission, tryRegisterPeriodicSync };
 })();

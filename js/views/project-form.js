@@ -114,9 +114,15 @@ Views.ProjectForm = (() => {
       }
 
       Store.saveProject(existing);
+      if (status === 'blocked' && status !== prevStatus) {
+        Notifications.ping(title, blocked ? `Blocked — ${blocked}` : 'Marked as blocked', 'high');
+      }
     } else {
       const project = Models.createProject({ title, description: desc, status, priority, tags, note, blockedReason: blocked });
       Store.saveProject(project);
+      if (status === 'blocked') {
+        Notifications.ping(title, blocked ? `Blocked — ${blocked}` : 'Marked as blocked', 'high');
+      }
     }
 
     App.closeModal();
@@ -152,6 +158,7 @@ Views.ProjectForm = (() => {
       project.blockedReason = reason;
       project.snoozedUntil = null;
       Store.saveProject(project);
+      Notifications.ping(project.title, reason ? `Blocked — ${reason}` : 'Marked as blocked', 'high');
       App.closeModal();
       _refresh();
     });

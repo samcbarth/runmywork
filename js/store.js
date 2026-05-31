@@ -89,9 +89,9 @@ const Store = (() => {
 
   function runAutoIdleDetection() {
     const settings = getSettings();
-    const idleMs = ((settings.thresholds && settings.thresholds.idleDaysWarning) || 7) * 86400000;
+    const idleMs = ((settings.thresholds && settings.thresholds.idleDaysWarning) || 1) * 86400000;
     const projects = getProjects();
-    let changed = false;
+    const newlyIdle = [];
 
     projects.forEach(project => {
       if (project.status !== 'active') return;
@@ -105,12 +105,12 @@ const Store = (() => {
         project.statusHistory.push({ status: 'idle', enteredAt: idleStart, note: 'Auto-detected idle' });
         project.status = 'idle';
         project.updatedAt = Date.now();
-        changed = true;
+        newlyIdle.push(project);
       }
     });
 
-    if (changed) _saveProjects(projects);
-    return getProjects();
+    if (newlyIdle.length) _saveProjects(projects);
+    return { projects: getProjects(), newlyIdle };
   }
 
   /* ── Settings ── */
