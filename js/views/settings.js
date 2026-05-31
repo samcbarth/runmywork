@@ -171,6 +171,7 @@ Views.Settings = (() => {
     settings.thresholds.blockedDaysWarning = Math.max(1, blockedDays);
     settings.thresholds.idleDaysWarning    = Math.max(1, idleDays);
     Store.saveSettings(settings);
+    setTimeout(() => App.syncPush(), 0);
 
     const btn = document.getElementById('save-notif-btn');
     btn.textContent = 'Saved ✓';
