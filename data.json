@@ -10,7 +10,7 @@
         "Tag"
       ],
       "createdAt": 1780263584335,
-      "updatedAt": 1780265173322,
+      "updatedAt": 1780265183506,
       "statusHistory": [
         {
           "status": "active",
@@ -59,10 +59,10 @@
       "links": [],
       "tasks": [
         {
-          "id": "262383d4-0f19-42cd-a25d-a3a85f506e65",
-          "text": "add rest of features",
+          "id": "b1a0cbd4-f4cc-4294-8c3a-218337a4e3a2",
+          "text": "connect ollama",
           "done": false,
-          "createdAt": 1780265173322
+          "createdAt": 1780265183506
         }
       ]
     },
@@ -98,5 +98,5 @@
     },
     "_k": "OWPogqiENR4SO4XWXdTejTfD0WyhrqFEqsS59Z6kaVVNVS73ITI9HS4XWPZ_8gpUwjLeK0zB0QDCO4RA11_tap_buhtig"
   },
-  "syncedAt": 1780265173331
+  "syncedAt": 1780265183513
 }
