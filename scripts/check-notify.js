@@ -13,8 +13,8 @@ catch { console.log('data.json not found or invalid — nothing to check.'); pro
 const projects  = raw.projects  || [];
 const settings  = raw.settings  || {};
 const thresholds = settings.thresholds || {};
-const blockedMs  = (thresholds.blockedDaysWarning || 3) * 86400000;
-const idleMs     = (thresholds.idleDaysWarning    || 7) * 86400000;
+const blockedMs  = (thresholds.blockedDaysWarning || 1) * 86400000;
+const idleMs     = (thresholds.idleDaysWarning    || 1) * 86400000;
 const now        = Date.now();
 
 function currentEntry(p) {

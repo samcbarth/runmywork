@@ -9,7 +9,7 @@ const Store = (() => {
 
   const DEFAULT_SETTINGS = {
     notificationsEnabled: false,
-    thresholds: { blockedDaysWarning: 3, idleDaysWarning: 7, dailyReminderTime: '09:00' },
+    thresholds: { blockedDaysWarning: 1, idleDaysWarning: 1, dailyReminderTime: '09:00' },
     lastNotificationCheck: 0,
     theme: 'auto'
   };

@@ -1,4 +1,4 @@
-const CACHE = 'runmywork-v12';
+const CACHE = 'runmywork-v13';
 const PRECACHE = [
   './',
   './index.html',
@@ -50,8 +50,8 @@ async function _checkNotifications(payload) {
   if (!payload || !payload.projects) return;
   const { projects, settings } = payload;
 
-  const blockedMs = ((settings.thresholds && settings.thresholds.blockedDaysWarning) || 3) * 86400000;
-  const idleMs    = ((settings.thresholds && settings.thresholds.idleDaysWarning)    || 7) * 86400000;
+  const blockedMs = ((settings.thresholds && settings.thresholds.blockedDaysWarning) || 1) * 86400000;
+  const idleMs    = ((settings.thresholds && settings.thresholds.idleDaysWarning)    || 1) * 86400000;
   const now = Date.now();
 
   for (const p of projects) {

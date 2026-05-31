@@ -52,27 +52,7 @@ Views.Settings = (() => {
           </label>
         </div>
 
-        <div class="setting-row">
-          <div class="setting-info">
-            <div class="setting-label">Alert when blocked for</div>
-          </div>
-          <div class="number-row">
-            <input class="number-input" id="blocked-days" type="number" min="1" max="30" value="${settings.thresholds.blockedDaysWarning}">
-            <span style="font-size:0.85rem;color:var(--text-2)">days</span>
-          </div>
-        </div>
-
-        <div class="setting-row">
-          <div class="setting-info">
-            <div class="setting-label">Alert when idle for</div>
-          </div>
-          <div class="number-row">
-            <input class="number-input" id="idle-days" type="number" min="1" max="60" value="${settings.thresholds.idleDaysWarning}">
-            <span style="font-size:0.85rem;color:var(--text-2)">days</span>
-          </div>
-        </div>
-
-        <div style="margin-top:12px;padding:12px;background:var(--surface-2);border-radius:var(--radius-sm);font-size:0.82rem;color:var(--text-2);line-height:1.7;">
+<div style="margin-top:12px;padding:12px;background:var(--surface-2);border-radius:var(--radius-sm);font-size:0.82rem;color:var(--text-2);line-height:1.7;">
           Push notifications (phone + desktop, even when app is closed) come via <strong>ntfy</strong>.<br>
           Install the <a href="https://ntfy.sh" target="_blank" rel="noopener" style="color:var(--accent);">ntfy app</a> and subscribe to topic: <code style="background:var(--border);padding:2px 6px;border-radius:4px;color:var(--text);">rmw-sam-9k2x7p</code>
         </div>
@@ -162,14 +142,10 @@ Views.Settings = (() => {
   }
 
   function _saveNotifSettings() {
-    const settings    = Store.getSettings();
-    const blockedDays = parseInt(document.getElementById('blocked-days')?.value || '3', 10);
-    const idleDays    = parseInt(document.getElementById('idle-days')?.value    || '7', 10);
-    const notifOn     = document.getElementById('notif-toggle')?.checked && Notification.permission === 'granted';
+    const settings = Store.getSettings();
+    const notifOn  = document.getElementById('notif-toggle')?.checked && Notification.permission === 'granted';
 
-    settings.notificationsEnabled          = notifOn;
-    settings.thresholds.blockedDaysWarning = Math.max(1, blockedDays);
-    settings.thresholds.idleDaysWarning    = Math.max(1, idleDays);
+    settings.notificationsEnabled = notifOn;
     Store.saveSettings(settings);
     setTimeout(() => App.syncPush(), 0);
 
