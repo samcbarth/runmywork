@@ -112,6 +112,7 @@ Views.Dashboard = (() => {
         ${tags}
         <div class="card-footer">
           <span class="time-invested">⏱ ${invested}</span>
+          ${(() => { const tasks = project.tasks || []; const rem = tasks.filter(t => !t.done).length; return rem > 0 ? `<span class="task-badge">${rem} task${rem !== 1 ? 's' : ''} left</span>` : ''; })()}
           <div class="card-actions">${_renderCardActions(project, isTimerRunning)}</div>
         </div>
       </div>

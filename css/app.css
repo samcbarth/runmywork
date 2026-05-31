@@ -746,6 +746,15 @@ svg { display: block; }
   color: var(--text);
 }
 .task-add-input:focus { outline: none; border-color: var(--accent); }
+.task-badge {
+  font-size: 0.75rem;
+  color: var(--text-2);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
 
 /* ── Stats row ───────────────────────────────────────────────────── */
 .stats-row {

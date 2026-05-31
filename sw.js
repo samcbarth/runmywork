@@ -1,4 +1,4 @@
-const CACHE = 'runmywork-v15';
+const CACHE = 'runmywork-v16';
 const PRECACHE = [
   './',
   './index.html',

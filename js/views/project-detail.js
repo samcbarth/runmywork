@@ -168,26 +168,12 @@ Views.ProjectDetail = (() => {
   }
 
   function _renderTasksSection(project) {
-    const tasks = project.tasks || [];
-    const doneCount = tasks.filter(t => t.done).length;
-    const total = tasks.length;
-
-    const rows = tasks.map(t => `
-      <div class="task-item${t.done ? ' task-done' : ''}">
-        <button class="task-check${t.done ? ' checked' : ''}"
-          onclick="Views.ProjectDetail.toggleTask('${project.id}','${t.id}')">
-          ${t.done ? '✓' : ''}
-        </button>
-        <span class="task-text">${Models.escapeHtml(t.text)}</span>
-        <button class="task-delete" onclick="Views.ProjectDetail.deleteTask('${project.id}','${t.id}')">✕</button>
-      </div>`).join('');
-
     return `
       <div class="section-card">
         <div class="section-header">
-          <span class="section-title">Tasks${total ? ` <span style="font-weight:400;color:var(--text-2);font-size:0.82rem;">${doneCount}/${total}</span>` : ''}</span>
+          <span class="section-title">Tasks <span id="task-count-${project.id}" style="font-weight:400;color:var(--text-2);font-size:0.82rem;">${_taskCountText(project)}</span></span>
         </div>
-        <div class="task-list">${rows}</div>
+        <div class="task-list" id="task-list-${project.id}">${_taskRows(project)}</div>
         <div class="task-add-row">
           <input class="task-add-input" id="task-input-${project.id}" type="text"
             placeholder="Add a task…"
@@ -195,6 +181,32 @@ Views.ProjectDetail = (() => {
           <button class="btn btn-sm" onclick="Views.ProjectDetail.addTask('${project.id}')">Add</button>
         </div>
       </div>`;
+  }
+
+  function _taskRows(project) {
+    return (project.tasks || []).map(t => `
+      <div class="task-item${t.done ? ' task-done' : ''}" data-task-id="${t.id}">
+        <button class="task-check${t.done ? ' checked' : ''}"
+          onclick="Views.ProjectDetail.toggleTask('${project.id}','${t.id}')">
+          ${t.done ? '✓' : ''}
+        </button>
+        <span class="task-text">${Models.escapeHtml(t.text)}</span>
+        <button class="task-delete" onclick="Views.ProjectDetail.deleteTask('${project.id}','${t.id}')">✕</button>
+      </div>`).join('');
+  }
+
+  function _taskCountText(project) {
+    const tasks = project.tasks || [];
+    if (!tasks.length) return '';
+    const done = tasks.filter(t => t.done).length;
+    return `${done}/${tasks.length}`;
+  }
+
+  function _updateTaskUI(projectId, project) {
+    const list = document.getElementById(`task-list-${projectId}`);
+    if (list) list.innerHTML = _taskRows(project);
+    const count = document.getElementById(`task-count-${projectId}`);
+    if (count) count.textContent = _taskCountText(project);
   }
 
   function _renderHistorySection(project) {
@@ -308,8 +320,9 @@ Views.ProjectDetail = (() => {
     project.tasks = project.tasks || [];
     project.tasks.push({ id: crypto.randomUUID(), text, done: false, createdAt: Date.now() });
     Store.saveProject(project);
-    render(projectId);
-    setTimeout(() => document.getElementById(`task-input-${projectId}`)?.focus(), 50);
+    input.value = '';
+    _updateTaskUI(projectId, project);
+    input.focus();
   }
 
   function toggleTask(projectId, taskId) {
@@ -319,7 +332,7 @@ Views.ProjectDetail = (() => {
     if (!task) return;
     task.done = !task.done;
     Store.saveProject(project);
-    render(projectId);
+    _updateTaskUI(projectId, project);
   }
 
   function deleteTask(projectId, taskId) {
@@ -327,7 +340,7 @@ Views.ProjectDetail = (() => {
     if (!project) return;
     project.tasks = (project.tasks || []).filter(t => t.id !== taskId);
     Store.saveProject(project);
-    render(projectId);
+    _updateTaskUI(projectId, project);
   }
 
   function _fmtElapsed(ms) {
