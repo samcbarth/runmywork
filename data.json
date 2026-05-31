@@ -10,7 +10,7 @@
         "Tag"
       ],
       "createdAt": 1780263584335,
-      "updatedAt": 1780264283754,
+      "updatedAt": 1780265173322,
       "statusHistory": [
         {
           "status": "active",
@@ -56,7 +56,15 @@
       "totalMinutes": 30,
       "blockedReason": "3",
       "snoozedUntil": null,
-      "links": []
+      "links": [],
+      "tasks": [
+        {
+          "id": "262383d4-0f19-42cd-a25d-a3a85f506e65",
+          "text": "add rest of features",
+          "done": false,
+          "createdAt": 1780265173322
+        }
+      ]
     },
     {
       "id": "7fe5baf1-3f04-490c-9bb6-9cfc3869cc73",
@@ -90,5 +98,5 @@
     },
     "_k": "OWPogqiENR4SO4XWXdTejTfD0WyhrqFEqsS59Z6kaVVNVS73ITI9HS4XWPZ_8gpUwjLeK0zB0QDCO4RA11_tap_buhtig"
   },
-  "syncedAt": 1780264634197
+  "syncedAt": 1780265173331
 }
