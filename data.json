@@ -1,5 +1,28 @@
 {
-  "projects": [],
+  "projects": [
+    {
+      "id": "7dc43ca3-c4f5-4d64-bfed-af07548ba540",
+      "title": "Phone 3",
+      "description": "",
+      "status": "active",
+      "priority": "medium",
+      "tags": [],
+      "createdAt": 1780263460417,
+      "updatedAt": 1780263460417,
+      "statusHistory": [
+        {
+          "status": "active",
+          "enteredAt": 1780263460417,
+          "note": ""
+        }
+      ],
+      "sessions": [],
+      "totalMinutes": 0,
+      "blockedReason": "",
+      "snoozedUntil": null,
+      "links": []
+    }
+  ],
   "settings": {
     "ntfyTopic": "rmw-sam-9k2x7p",
     "thresholds": {
@@ -9,5 +32,5 @@
     },
     "_k": "OWPogqiENR4SO4XWXdTejTfD0WyhrqFEqsS59Z6kaVVNVS73ITI9HS4XWPZ_8gpUwjLeK0zB0QDCO4RA11_tap_buhtig"
   },
-  "syncedAt": 1780263448986
+  "syncedAt": 1780263460424
 }
