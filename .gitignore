@@ -1,0 +1,5 @@
+# Local advisor launcher — contains your PAT, never commit it
+scripts/run-advisor.bat
+
+node_modules/
+.DS_Store

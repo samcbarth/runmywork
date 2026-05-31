@@ -16,7 +16,9 @@ const Models = (() => {
       blockedReason: data.blockedReason || '',
       snoozedUntil: null,
       links: [],
-      tasks: []
+      tasks: [],
+      aiSuggestion: null,
+      aiRequested: false
     };
   }
 
