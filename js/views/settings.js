@@ -26,7 +26,7 @@ Views.Settings = (() => {
             placeholder="github_pat_…"
             value="${Models.escapeHtml(ghConfig.pat || '')}"
             autocomplete="off">
-          <p class="form-hint">Stored in this browser and synced privately to your repo — only enter this once, on any one device.</p>
+          <p class="form-hint">Stored in this browser only — enter once per device. Your projects sync automatically after that.</p>
         </div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
           <button class="btn btn-primary" id="sync-save-btn">Save &amp; sync</button>

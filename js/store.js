@@ -258,7 +258,6 @@ const GithubSync = (() => {
       localStorage.setItem(Store.KEYS.projects, JSON.stringify(data.projects));
     }
     if (data.settings) {
-      if (data.settings.githubPat) saveConfig(data.settings.githubPat, data.settings.githubRepo || REPO);
       const local = Store.getSettings();
       Store.saveSettings({
         ...local,
@@ -317,9 +316,7 @@ const GithubSync = (() => {
         projects: Store.getProjects(),
         settings: {
           ntfyTopic:  NTFY_TOPIC,
-          thresholds: settings.thresholds || {},
-          githubPat:  pat,
-          githubRepo: REPO
+          thresholds: settings.thresholds || {}
         },
         syncedAt: Date.now()
       };
