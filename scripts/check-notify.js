@@ -4,8 +4,7 @@
 const fs   = require('fs');
 const https = require('https');
 
-const ntfyTopic = process.env.NTFY_TOPIC;
-if (!ntfyTopic) { console.log('NTFY_TOPIC not set — skipping notifications.'); process.exit(0); }
+const ntfyTopic = process.env.NTFY_TOPIC || 'rmw-sam-9k2x7p';
 
 let raw;
 try { raw = JSON.parse(fs.readFileSync('data.json', 'utf8')); }

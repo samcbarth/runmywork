@@ -222,7 +222,8 @@ const Store = (() => {
 
 const GithubSync = (() => {
   let _pushing = false;
-  const REPO = 'samcbarth/runmywork';
+  const REPO      = 'samcbarth/runmywork';
+  const NTFY_TOPIC = 'rmw-sam-9k2x7p';   // hardcoded — subscribe to this in the ntfy app
 
   function getConfig() {
     try {
@@ -304,10 +305,10 @@ const GithubSync = (() => {
       const data = {
         projects: Store.getProjects(),
         settings: {
-          ntfyTopic:  settings.ntfyTopic  || '',
+          ntfyTopic:  NTFY_TOPIC,
           thresholds: settings.thresholds || {},
           githubPat:  pat,        // stored here so other devices bootstrap automatically
-          githubRepo: repo
+          githubRepo: REPO
         },
         syncedAt: Date.now()
       };
@@ -350,5 +351,5 @@ const GithubSync = (() => {
     }
   }
 
-  return { getConfig, saveConfig, isConfigured, pull, push };
+  return { getConfig, saveConfig, isConfigured, pull, push, NTFY_TOPIC, REPO };
 })();

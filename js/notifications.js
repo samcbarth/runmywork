@@ -1,7 +1,6 @@
 const Notifications = (() => {
   async function checkOnOpen() {
     const settings = Store.getSettings();
-    if (!settings.notificationsEnabled) return;
     if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
 
     const now = Date.now();
@@ -14,11 +13,10 @@ const Notifications = (() => {
     let reg = null;
     try { reg = await navigator.serviceWorker?.ready; } catch { /* no SW */ }
 
-    notifiable.forEach(project => {
+    for (const project of notifiable) {
       const timeIn = Models.timeInCurrentStatus(project);
       const days = Math.floor(timeIn / 86400000);
       const dayWord = days === 1 ? 'day' : 'days';
-
       const body = project.status === 'blocked'
         ? `Blocked for ${days} ${dayWord}${project.blockedReason ? ' — ' + project.blockedReason : ''}`
         : `Idle for ${days} ${dayWord} — no recent activity`;
@@ -34,16 +32,28 @@ const Notifications = (() => {
       };
 
       try {
-        if (reg) {
-          reg.showNotification(project.title, opts);
-        } else {
-          new Notification(project.title, opts);
-        }
+        if (reg) reg.showNotification(project.title, opts);
+        else new Notification(project.title, opts);
       } catch { /* silent */ }
-    });
+
+      // Also ping ntfy so it works even when app is closed
+      _sendNtfy(project.title, body, project.status === 'blocked' ? 'high' : 'default').catch(() => {});
+    }
 
     settings.lastNotificationCheck = now;
     Store.saveSettings(settings);
+  }
+
+  async function _sendNtfy(title, body, priority) {
+    await fetch(`https://ntfy.sh/${GithubSync.NTFY_TOPIC}`, {
+      method: 'POST',
+      headers: {
+        'Title':    title,
+        'Priority': priority || 'default',
+        'Tags':     priority === 'high' ? 'rotating_light' : 'calendar'
+      },
+      body
+    });
   }
 
   async function requestPermission() {

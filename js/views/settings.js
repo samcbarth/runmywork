@@ -1,12 +1,9 @@
 Views.Settings = (() => {
   function render() {
-    const settings  = Store.getSettings();
-    const ghConfig  = GithubSync.getConfig();
+    const ghConfig   = GithubSync.getConfig();
+    const settings   = Store.getSettings();
     const permStatus = typeof Notification !== 'undefined' ? Notification.permission : 'unsupported';
-
-    const permNote = permStatus === 'denied'
-      ? '<p style="color:var(--c-blocked);font-size:0.8rem;margin-top:6px;">Notifications blocked in browser. Click the lock icon in the address bar and reset permissions.</p>'
-      : '';
+    const hasPat     = !!ghConfig.pat;
 
     document.getElementById('view-root').innerHTML = `
       <button class="detail-back" onclick="App.navigate('')">
@@ -17,66 +14,35 @@ Views.Settings = (() => {
 
       <!-- ── Sync ── -->
       <div class="settings-section">
-        <div class="settings-section-title">GitHub Sync</div>
+        <div class="settings-section-title">GitHub Sync ${hasPat ? '<span style="color:var(--c-active);font-weight:400;text-transform:none;font-size:0.8rem;">● Connected</span>' : '<span style="color:var(--c-blocked);font-weight:400;text-transform:none;font-size:0.8rem;">● Not connected</span>'}</div>
         <p style="font-size:0.82rem;color:var(--text-2);margin-bottom:14px;line-height:1.6;">
-          Stores your projects in <code>data.json</code> in this repo so every device sees the same data.
-          Requires a GitHub Personal Access Token with <strong>Contents: Read &amp; Write</strong> on this repo.
-          <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener" style="color:var(--accent);">Create a fine-grained PAT →</a>
+          Syncs your projects to GitHub so every device stays in sync automatically.
+          Requires a GitHub Personal Access Token with <strong>Contents: Read &amp; Write</strong> on <code>samcbarth/runmywork</code>.
+          <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener" style="color:var(--accent);">Create one →</a>
         </p>
-
         <div class="form-group">
           <label class="form-label" for="gh-pat">Personal Access Token</label>
           <input class="form-input" id="gh-pat" type="password"
             placeholder="github_pat_…"
             value="${Models.escapeHtml(ghConfig.pat || '')}"
             autocomplete="off">
-          <p class="form-hint">Stored only in this browser — never sent anywhere except api.github.com.</p>
+          <p class="form-hint">Stored in this browser and synced privately to your repo — only enter this once, on any one device.</p>
         </div>
-
-        <div class="form-group">
-          <label class="form-label" for="gh-repo">Repository</label>
-          <input class="form-input" id="gh-repo" type="text"
-            placeholder="owner/repo"
-            value="${Models.escapeHtml(ghConfig.repo || 'samcbarth/runmywork')}">
-        </div>
-
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-          <button class="btn btn-primary" id="sync-save-btn">Save &amp; sync now</button>
+          <button class="btn btn-primary" id="sync-save-btn">Save &amp; sync</button>
           <span id="sync-result" style="font-size:0.82rem;color:var(--text-2);"></span>
         </div>
       </div>
 
       <!-- ── Notifications ── -->
       <div class="settings-section">
-        <div class="settings-section-title">Push Notifications</div>
-        <p style="font-size:0.82rem;color:var(--text-2);margin-bottom:14px;line-height:1.6;">
-          Daily notifications via <a href="https://ntfy.sh" target="_blank" rel="noopener" style="color:var(--accent);">ntfy.sh</a> — free, no account needed.
-          Install the <strong>ntfy app</strong> on your phone, then subscribe to your topic.
-          A GitHub Actions cron runs at 9am EST and notifies you about blocked/idle projects.
-        </p>
-
-        <div class="form-group">
-          <label class="form-label" for="ntfy-topic">ntfy Topic <span class="optional">(keep this private)</span></label>
-          <input class="form-input" id="ntfy-topic" type="text"
-            placeholder="e.g. runmywork-sam-abc123"
-            value="${Models.escapeHtml(settings.ntfyTopic || '')}">
-          <p class="form-hint">Use something unguessable. Also add this as a GitHub repo secret named <strong>NTFY_TOPIC</strong> for the cron job: Settings → Secrets → Actions.</p>
-        </div>
-
-        <div style="display:flex;gap:8px;flex-wrap:wrap;">
-          <button class="btn" id="test-ntfy-btn">Send test notification</button>
-        </div>
-      </div>
-
-      <!-- ── Browser notifications ── -->
-      <div class="settings-section">
-        <div class="settings-section-title">Browser Notifications</div>
+        <div class="settings-section-title">Notifications</div>
 
         <div class="setting-row">
           <div class="setting-info">
-            <div class="setting-label">Enable on-open alerts</div>
-            <div class="setting-desc">Notify when you open the app and a project is blocked or idle.</div>
-            ${permNote}
+            <div class="setting-label">Browser alerts</div>
+            <div class="setting-desc">Notify when you open the app and something is blocked or idle.</div>
+            ${permStatus === 'denied' ? '<p style="color:var(--c-blocked);font-size:0.8rem;margin-top:4px;">Blocked in browser — reset via the lock icon in the address bar.</p>' : ''}
           </div>
           <label class="toggle">
             <input type="checkbox" id="notif-toggle"
@@ -106,7 +72,12 @@ Views.Settings = (() => {
           </div>
         </div>
 
-        <button class="btn btn-primary" id="save-notif-btn" style="margin-top:8px;">Save notification settings</button>
+        <div style="margin-top:12px;padding:12px;background:var(--surface-2);border-radius:var(--radius-sm);font-size:0.82rem;color:var(--text-2);line-height:1.7;">
+          Push notifications (phone + desktop, even when app is closed) come via <strong>ntfy</strong>.<br>
+          Install the <a href="https://ntfy.sh" target="_blank" rel="noopener" style="color:var(--accent);">ntfy app</a> and subscribe to topic: <code style="background:var(--border);padding:2px 6px;border-radius:4px;color:var(--text);">rmw-sam-9k2x7p</code>
+        </div>
+
+        <button class="btn btn-primary" id="save-notif-btn" style="margin-top:12px;">Save</button>
       </div>
 
       <!-- ── Data ── -->
@@ -126,20 +97,15 @@ Views.Settings = (() => {
         </div>
       </div>
 
-      <p style="font-size:0.78rem;color:var(--text-2);text-align:center;margin-top:8px;" id="project-count"></p>
+      <p style="font-size:0.75rem;color:var(--text-2);text-align:center;margin-top:8px;" id="project-count"></p>
     `;
 
     const projects = Store.getProjects();
-    const countEl = document.getElementById('project-count');
-    if (countEl) countEl.textContent = `${projects.length} project${projects.length !== 1 ? 's' : ''} stored locally`;
+    const countEl  = document.getElementById('project-count');
+    if (countEl) countEl.textContent = `${projects.length} project${projects.length !== 1 ? 's' : ''}`;
 
-    // GitHub sync save
     document.getElementById('sync-save-btn').addEventListener('click', _saveGithubConfig);
 
-    // ntfy test
-    document.getElementById('test-ntfy-btn').addEventListener('click', _testNtfy);
-
-    // Browser notif toggle
     const toggle = document.getElementById('notif-toggle');
     toggle.addEventListener('change', async () => {
       if (toggle.checked) {
@@ -152,67 +118,33 @@ Views.Settings = (() => {
       }
     });
 
-    // Save notif settings
     document.getElementById('save-notif-btn').addEventListener('click', _saveNotifSettings);
   }
 
   async function _saveGithubConfig() {
     const pat    = document.getElementById('gh-pat').value.trim();
-    const repo   = document.getElementById('gh-repo').value.trim();
-    const topic  = document.getElementById('ntfy-topic').value.trim();
     const result = document.getElementById('sync-result');
+    const btn    = document.getElementById('sync-save-btn');
 
-    GithubSync.saveConfig(pat, repo);
+    GithubSync.saveConfig(pat, GithubSync.REPO);
 
-    // Also save ntfy topic to settings
-    const settings = Store.getSettings();
-    settings.ntfyTopic = topic;
-    Store.saveSettings(settings);
+    if (!pat) { result.textContent = 'Enter a PAT to enable sync.'; return; }
 
-    if (!pat || !repo) {
-      result.textContent = 'Enter a PAT and repo to sync.';
-      return;
-    }
-
+    result.style.color = 'var(--text-2)';
     result.textContent = '⟳ Syncing…';
-    const btn = document.getElementById('sync-save-btn');
     btn.disabled = true;
 
-    // Pull first (merge remote → local), then push local → remote
-    const pullRes = await GithubSync.pull();
+    await GithubSync.pull();
     const pushRes = await GithubSync.push();
 
     btn.disabled = false;
-
     if (pushRes.ok) {
       result.style.color = 'var(--c-active)';
-      result.textContent = '✓ Synced successfully';
+      result.textContent = '✓ Synced — all devices will pick this up automatically';
     } else {
       result.style.color = 'var(--c-blocked)';
-      result.textContent = `✗ Failed: ${pushRes.reason}`;
+      result.textContent = `✗ ${pushRes.reason}`;
     }
-  }
-
-  async function _testNtfy() {
-    const topic = document.getElementById('ntfy-topic').value.trim();
-    if (!topic) { alert('Enter an ntfy topic first.'); return; }
-
-    const btn = document.getElementById('test-ntfy-btn');
-    btn.textContent = 'Sending…';
-    btn.disabled = true;
-
-    try {
-      const res = await fetch(`https://ntfy.sh/${encodeURIComponent(topic)}`, {
-        method: 'POST',
-        headers: { 'Title': 'RunMyWork', 'Tags': 'white_check_mark' },
-        body: 'Test notification from RunMyWork — notifications are working!'
-      });
-      btn.textContent = res.ok ? '✓ Sent!' : '✗ Failed';
-    } catch {
-      btn.textContent = '✗ Network error';
-    }
-
-    setTimeout(() => { btn.textContent = 'Send test notification'; btn.disabled = false; }, 3000);
   }
 
   function _saveNotifSettings() {
@@ -221,21 +153,19 @@ Views.Settings = (() => {
     const idleDays    = parseInt(document.getElementById('idle-days')?.value    || '7', 10);
     const notifOn     = document.getElementById('notif-toggle')?.checked && Notification.permission === 'granted';
 
-    settings.notificationsEnabled            = notifOn;
-    settings.thresholds.blockedDaysWarning   = Math.max(1, blockedDays);
-    settings.thresholds.idleDaysWarning      = Math.max(1, idleDays);
-
+    settings.notificationsEnabled          = notifOn;
+    settings.thresholds.blockedDaysWarning = Math.max(1, blockedDays);
+    settings.thresholds.idleDaysWarning    = Math.max(1, idleDays);
     Store.saveSettings(settings);
 
     const btn = document.getElementById('save-notif-btn');
     btn.textContent = 'Saved ✓';
     btn.style.background = 'var(--c-active)';
-    setTimeout(() => { btn.textContent = 'Save notification settings'; btn.style.background = ''; }, 2000);
+    setTimeout(() => { btn.textContent = 'Save'; btn.style.background = ''; }, 2000);
   }
 
   function exportData() {
-    const json = Store.exportData();
-    const blob = new Blob([json], { type: 'application/json' });
+    const blob = new Blob([Store.exportData()], { type: 'application/json' });
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement('a');
     a.href = url;
@@ -253,13 +183,8 @@ Views.Settings = (() => {
       if (!file) return;
       const reader = new FileReader();
       reader.onload = () => {
-        try {
-          Store.importData(reader.result);
-          alert('Imported successfully!');
-          render();
-        } catch (e) {
-          alert('Import failed: ' + e.message);
-        }
+        try { Store.importData(reader.result); alert('Imported!'); render(); }
+        catch (e) { alert('Import failed: ' + e.message); }
       };
       reader.readAsText(file);
     });
