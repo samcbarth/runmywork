@@ -1,0 +1,11 @@
+{
+  "projects": [],
+  "settings": {
+    "ntfyTopic": "",
+    "thresholds": {
+      "blockedDaysWarning": 3,
+      "idleDaysWarning": 7
+    }
+  },
+  "syncedAt": null
+}

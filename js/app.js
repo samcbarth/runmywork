@@ -117,26 +117,51 @@ const App = (() => {
     }
   }
 
+  /* ── Sync indicator ── */
+
+  function showSyncStatus(state) {
+    let el = document.getElementById('sync-status');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'sync-status';
+      el.style.cssText = 'position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--surface);border:1px solid var(--border);border-radius:999px;padding:6px 14px;font-size:0.78rem;color:var(--text-2);z-index:500;box-shadow:0 2px 8px rgba(0,0,0,0.15);transition:opacity 0.3s;pointer-events:none;';
+      document.body.appendChild(el);
+    }
+    const msgs = { syncing: '⟳ Syncing…', ok: '✓ Synced', error: '⚠ Sync failed', pulling: '⟳ Loading…' };
+    el.textContent = msgs[state] || state;
+    el.style.opacity = '1';
+    if (state === 'ok') setTimeout(() => { el.style.opacity = '0'; }, 2000);
+  }
+
+  async function syncPush() {
+    if (!GithubSync.isConfigured()) return;
+    showSyncStatus('syncing');
+    const result = await GithubSync.push();
+    showSyncStatus(result.ok ? 'ok' : 'error');
+  }
+
   /* ── Init ── */
 
-  function init() {
+  async function init() {
     window.addEventListener('hashchange', _handleRoute);
 
-    // Restore running timer if app was closed during a session
     const activeSession = Store.getActiveSession();
-    if (activeSession) {
-      startGlobalTimer(activeSession);
-    }
+    if (activeSession) startGlobalTimer(activeSession);
 
     _registerSW();
-
-    // Run notifications check after a brief delay (let page render first)
     setTimeout(() => Notifications.checkOnOpen(), 1500);
+
+    // Pull latest data from GitHub before rendering
+    if (GithubSync.isConfigured()) {
+      showSyncStatus('pulling');
+      const result = await GithubSync.pull();
+      showSyncStatus(result.ok ? 'ok' : 'error');
+    }
 
     _handleRoute();
   }
 
   document.addEventListener('DOMContentLoaded', init);
 
-  return { navigate, openModal, openModalFull, closeModal, startGlobalTimer, stopGlobalTimer };
+  return { navigate, openModal, openModalFull, closeModal, startGlobalTimer, stopGlobalTimer, syncPush };
 })();

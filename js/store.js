@@ -1,8 +1,10 @@
 const Store = (() => {
   const KEYS = {
-    projects: 'tracker_projects',
-    settings: 'tracker_settings',
-    session:  'tracker_active_session'
+    projects:   'tracker_projects',
+    settings:   'tracker_settings',
+    session:    'tracker_active_session',
+    githubCfg:  'tracker_github_config',
+    githubSha:  'tracker_github_sha'
   };
 
   const DEFAULT_SETTINGS = {
@@ -38,12 +40,14 @@ const Store = (() => {
     }
     _saveProjects(projects);
     _writeNotifyCache(project);
+    setTimeout(() => App.syncPush(), 0);
     return project;
   }
 
   function deleteProject(id) {
     _saveProjects(getProjects().filter(p => p.id !== id));
     _deleteNotifyCache(id);
+    setTimeout(() => App.syncPush(), 0);
   }
 
   /* ── Sessions ── */
@@ -63,6 +67,7 @@ const Store = (() => {
 
     _saveProjects(projects);
     _writeNotifyCache(project);
+    setTimeout(() => App.syncPush(), 0);
     return project;
   }
 
@@ -76,6 +81,7 @@ const Store = (() => {
     project.updatedAt = Date.now();
 
     _saveProjects(projects);
+    setTimeout(() => App.syncPush(), 0);
     return project;
   }
 
@@ -207,6 +213,128 @@ const Store = (() => {
     addSession, deleteSession, runAutoIdleDetection,
     getSettings, saveSettings,
     getActiveSession, saveActiveSession, clearActiveSession,
-    exportData, importData, clearAll
+    exportData, importData, clearAll,
+    KEYS
   };
+})();
+
+/* ── GitHub sync ─────────────────────────────────────────────────── */
+
+const GithubSync = (() => {
+  let _pushing = false;
+
+  function getConfig() {
+    try { return JSON.parse(localStorage.getItem(Store.KEYS.githubCfg) || '{}'); }
+    catch { return {}; }
+  }
+
+  function saveConfig(pat, repo) {
+    localStorage.setItem(Store.KEYS.githubCfg, JSON.stringify({ pat, repo }));
+  }
+
+  function isConfigured() {
+    const { pat, repo } = getConfig();
+    return !!(pat && repo);
+  }
+
+  function _sha() { return localStorage.getItem(Store.KEYS.githubSha) || null; }
+  function _setSha(sha) { localStorage.setItem(Store.KEYS.githubSha, sha); }
+
+  function _b64encode(str) {
+    return btoa(unescape(encodeURIComponent(str)));
+  }
+
+  function _b64decode(str) {
+    return decodeURIComponent(escape(atob(str.replace(/\s/g, ''))));
+  }
+
+  async function pull() {
+    const { pat, repo } = getConfig();
+    if (!pat || !repo) return { ok: false, reason: 'not-configured' };
+
+    try {
+      const res = await fetch(
+        `https://api.github.com/repos/${repo}/contents/data.json`,
+        { headers: { Authorization: `token ${pat}`, Accept: 'application/vnd.github.v3+json' } }
+      );
+      if (res.status === 404) return { ok: false, reason: 'not-found' };
+      if (!res.ok) return { ok: false, reason: `http-${res.status}` };
+
+      const file = await res.json();
+      const data = JSON.parse(_b64decode(file.content));
+      _setSha(file.sha);
+
+      if (Array.isArray(data.projects)) {
+        localStorage.setItem(Store.KEYS.projects, JSON.stringify(data.projects));
+      }
+      if (data.settings) {
+        const local = Store.getSettings();
+        Store.saveSettings({
+          ...local,
+          ntfyTopic:  data.settings.ntfyTopic  ?? local.ntfyTopic,
+          thresholds: data.settings.thresholds ?? local.thresholds
+        });
+      }
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, reason: e.message };
+    }
+  }
+
+  async function push() {
+    if (_pushing) return { ok: false, reason: 'busy' };
+    const { pat, repo } = getConfig();
+    if (!pat || !repo) return { ok: false, reason: 'not-configured' };
+
+    _pushing = true;
+    try {
+      const settings = Store.getSettings();
+      const data = {
+        projects: Store.getProjects(),
+        settings: {
+          ntfyTopic:  settings.ntfyTopic  || '',
+          thresholds: settings.thresholds || {}
+        },
+        syncedAt: Date.now()
+      };
+      const content = _b64encode(JSON.stringify(data, null, 2));
+      const sha = _sha();
+
+      const res = await fetch(
+        `https://api.github.com/repos/${repo}/contents/data.json`,
+        {
+          method: 'PUT',
+          headers: {
+            Authorization:   `token ${pat}`,
+            Accept:          'application/vnd.github.v3+json',
+            'Content-Type':  'application/json'
+          },
+          body: JSON.stringify({
+            message: `sync ${new Date().toISOString().slice(0, 16).replace('T', ' ')}`,
+            content,
+            ...(sha ? { sha } : {})
+          })
+        }
+      );
+
+      if (res.status === 409) {
+        // SHA conflict — re-pull and retry once
+        await pull();
+        _pushing = false;
+        return push();
+      }
+
+      if (!res.ok) { _pushing = false; return { ok: false, reason: `http-${res.status}` }; }
+
+      const result = await res.json();
+      _setSha(result.content.sha);
+      _pushing = false;
+      return { ok: true };
+    } catch (e) {
+      _pushing = false;
+      return { ok: false, reason: e.message };
+    }
+  }
+
+  return { getConfig, saveConfig, isConfigured, pull, push };
 })();

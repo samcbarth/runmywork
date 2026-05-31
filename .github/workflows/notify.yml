@@ -1,0 +1,18 @@
+name: Daily project notifications
+
+on:
+  schedule:
+    - cron: '0 14 * * *'  # 9am EST / 6am PST daily
+  workflow_dispatch:       # also runnable manually from Actions tab
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check projects and send notifications
+        run: node scripts/check-notify.js
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
