@@ -131,19 +131,33 @@ Views.Settings = (() => {
     if (!pat) { result.textContent = 'Enter a PAT to enable sync.'; return; }
 
     result.style.color = 'var(--text-2)';
-    result.textContent = '⟳ Syncing…';
+    result.textContent = '⟳ Pulling…';
     btn.disabled = true;
 
-    await GithubSync.pull();
-    const pushRes = await GithubSync.push();
+    try {
+      const pullRes = await GithubSync.pull();
+      if (!pullRes.ok && pullRes.reason !== 'not-configured' && pullRes.reason !== 'not-found') {
+        btn.disabled = false;
+        result.style.color = 'var(--c-blocked)';
+        result.textContent = `✗ Pull failed: ${pullRes.reason}`;
+        return;
+      }
 
-    btn.disabled = false;
-    if (pushRes.ok) {
-      result.style.color = 'var(--c-active)';
-      result.textContent = '✓ Synced — all devices will pick this up automatically';
-    } else {
+      result.textContent = '⟳ Pushing…';
+      const pushRes = await GithubSync.push();
+
+      btn.disabled = false;
+      if (pushRes.ok) {
+        result.style.color = 'var(--c-active)';
+        result.textContent = '✓ Synced — all devices will pick this up automatically';
+      } else {
+        result.style.color = 'var(--c-blocked)';
+        result.textContent = `✗ Push failed: ${pushRes.reason}`;
+      }
+    } catch (e) {
+      btn.disabled = false;
       result.style.color = 'var(--c-blocked)';
-      result.textContent = `✗ ${pushRes.reason}`;
+      result.textContent = `✗ Error: ${e.message}`;
     }
   }
 
