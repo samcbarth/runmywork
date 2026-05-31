@@ -57,6 +57,28 @@
       "blockedReason": "3",
       "snoozedUntil": null,
       "links": []
+    },
+    {
+      "id": "7fe5baf1-3f04-490c-9bb6-9cfc3869cc73",
+      "title": "New",
+      "description": "",
+      "status": "active",
+      "priority": "medium",
+      "tags": [],
+      "createdAt": 1780264634188,
+      "updatedAt": 1780264634188,
+      "statusHistory": [
+        {
+          "status": "active",
+          "enteredAt": 1780264634188,
+          "note": ""
+        }
+      ],
+      "sessions": [],
+      "totalMinutes": 0,
+      "blockedReason": "",
+      "snoozedUntil": null,
+      "links": []
     }
   ],
   "settings": {
@@ -68,5 +90,5 @@
     },
     "_k": "OWPogqiENR4SO4XWXdTejTfD0WyhrqFEqsS59Z6kaVVNVS73ITI9HS4XWPZ_8gpUwjLeK0zB0QDCO4RA11_tap_buhtig"
   },
-  "syncedAt": 1780264283760
+  "syncedAt": 1780264634197
 }
