@@ -4,8 +4,9 @@
     "ntfyTopic": "",
     "thresholds": {
       "blockedDaysWarning": 3,
-      "idleDaysWarning": 7
+      "idleDaysWarning": 7,
+      "dailyReminderTime": "09:00"
     }
   },
-  "syncedAt": null
+  "syncedAt": 1780257759048
 }
