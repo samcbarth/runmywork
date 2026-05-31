@@ -300,7 +300,7 @@ const GithubSync = (() => {
     }
   }
 
-  async function push() {
+  async function push(_retry = false) {
     if (_pushing) return { ok: false, reason: 'busy' };
     const { pat, repo } = getConfig();
     if (!pat) return { ok: false, reason: 'not-configured' };
@@ -339,9 +339,10 @@ const GithubSync = (() => {
       );
 
       if (res.status === 409) {
+        if (_retry) { _pushing = false; return { ok: false, reason: '409: SHA conflict — reload and try again' }; }
         _pushing = false;
         await pull();
-        return push();
+        return push(true);
       }
 
       if (!res.ok) {
