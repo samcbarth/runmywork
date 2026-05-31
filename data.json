@@ -4,13 +4,13 @@
       "id": "828c081b-d77c-4e88-9bfd-66f2cffea659",
       "title": "Finishing RunMyWork",
       "description": "Description",
-      "status": "blocked",
+      "status": "idle",
       "priority": "medium",
       "tags": [
         "Tag"
       ],
       "createdAt": 1780263584335,
-      "updatedAt": 1780266408809,
+      "updatedAt": 1780266655172,
       "statusHistory": [
         {
           "status": "active",
@@ -41,6 +41,11 @@
           "status": "blocked",
           "enteredAt": 1780264104579,
           "note": ""
+        },
+        {
+          "status": "idle",
+          "enteredAt": 1780266655172,
+          "note": ""
         }
       ],
       "sessions": [
@@ -54,7 +59,7 @@
         }
       ],
       "totalMinutes": 30,
-      "blockedReason": "3",
+      "blockedReason": "",
       "snoozedUntil": null,
       "links": [],
       "tasks": [
@@ -94,5 +99,5 @@
     },
     "_k": "OWPogqiENR4SO4XWXdTejTfD0WyhrqFEqsS59Z6kaVVNVS73ITI9HS4XWPZ_8gpUwjLeK0zB0QDCO4RA11_tap_buhtig"
   },
-  "syncedAt": 1780266408817
+  "syncedAt": 1780266655182
 }
