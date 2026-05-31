@@ -15,7 +15,8 @@ const Models = (() => {
       totalMinutes: 0,
       blockedReason: data.blockedReason || '',
       snoozedUntil: null,
-      links: []
+      links: [],
+      tasks: []
     };
   }
 

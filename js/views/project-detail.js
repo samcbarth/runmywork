@@ -88,6 +88,7 @@ Views.ProjectDetail = (() => {
       </div>
 
       ${_renderSessionsSection(project, isTimerRunning)}
+      ${_renderTasksSection(project)}
       ${_renderLinksSection(project)}
       ${_renderHistorySection(project)}
 
@@ -162,6 +163,36 @@ Views.ProjectDetail = (() => {
         </div>
         <div class="links-list">
           ${rows || '<p style="color:var(--text-2);font-size:0.85rem;">No links yet.</p>'}
+        </div>
+      </div>`;
+  }
+
+  function _renderTasksSection(project) {
+    const tasks = project.tasks || [];
+    const doneCount = tasks.filter(t => t.done).length;
+    const total = tasks.length;
+
+    const rows = tasks.map(t => `
+      <div class="task-item${t.done ? ' task-done' : ''}">
+        <button class="task-check${t.done ? ' checked' : ''}"
+          onclick="Views.ProjectDetail.toggleTask('${project.id}','${t.id}')">
+          ${t.done ? '✓' : ''}
+        </button>
+        <span class="task-text">${Models.escapeHtml(t.text)}</span>
+        <button class="task-delete" onclick="Views.ProjectDetail.deleteTask('${project.id}','${t.id}')">✕</button>
+      </div>`).join('');
+
+    return `
+      <div class="section-card">
+        <div class="section-header">
+          <span class="section-title">Tasks${total ? ` <span style="font-weight:400;color:var(--text-2);font-size:0.82rem;">${doneCount}/${total}</span>` : ''}</span>
+        </div>
+        <div class="task-list">${rows}</div>
+        <div class="task-add-row">
+          <input class="task-add-input" id="task-input-${project.id}" type="text"
+            placeholder="Add a task…"
+            onkeydown="if(event.key==='Enter')Views.ProjectDetail.addTask('${project.id}')">
+          <button class="btn btn-sm" onclick="Views.ProjectDetail.addTask('${project.id}')">Add</button>
         </div>
       </div>`;
   }
@@ -268,11 +299,42 @@ Views.ProjectDetail = (() => {
     render(projectId);
   }
 
+  function addTask(projectId) {
+    const input = document.getElementById(`task-input-${projectId}`);
+    const text = input?.value.trim();
+    if (!text) { input?.focus(); return; }
+    const project = Store.getProject(projectId);
+    if (!project) return;
+    project.tasks = project.tasks || [];
+    project.tasks.push({ id: crypto.randomUUID(), text, done: false, createdAt: Date.now() });
+    Store.saveProject(project);
+    render(projectId);
+    setTimeout(() => document.getElementById(`task-input-${projectId}`)?.focus(), 50);
+  }
+
+  function toggleTask(projectId, taskId) {
+    const project = Store.getProject(projectId);
+    if (!project) return;
+    const task = (project.tasks || []).find(t => t.id === taskId);
+    if (!task) return;
+    task.done = !task.done;
+    Store.saveProject(project);
+    render(projectId);
+  }
+
+  function deleteTask(projectId, taskId) {
+    const project = Store.getProject(projectId);
+    if (!project) return;
+    project.tasks = (project.tasks || []).filter(t => t.id !== taskId);
+    Store.saveProject(project);
+    render(projectId);
+  }
+
   function _fmtElapsed(ms) {
     const h = Math.floor(ms / 3600000);
     const m = Math.floor((ms % 3600000) / 60000);
     return h > 0 ? `${h}h ${m}m` : `${m}m`;
   }
 
-  return { render, toggleStatusMenu, changeStatus, deleteSession, addLink, deleteLink };
+  return { render, toggleStatusMenu, changeStatus, deleteSession, addLink, deleteLink, addTask, toggleTask, deleteTask };
 })();

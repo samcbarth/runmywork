@@ -692,6 +692,61 @@ svg { display: block; }
 }
 .link-delete:hover { background: var(--bg-blocked); color: var(--c-blocked); }
 
+/* ── Tasks ──────────────────────────────────────────────────────── */
+.task-list { display: flex; flex-direction: column; }
+.task-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+.task-item:last-child { border-bottom: none; }
+.task-item.task-done .task-text { text-decoration: line-through; color: var(--text-2); }
+.task-check {
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 0.7rem;
+  color: white;
+  transition: border-color 0.15s, background 0.15s;
+}
+.task-check.checked { background: var(--c-active); border-color: var(--c-active); }
+.task-text { flex: 1; font-size: 0.9rem; line-height: 1.4; }
+.task-delete {
+  color: var(--text-2);
+  font-size: 0.75rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  opacity: 0.4;
+}
+.task-delete:hover { opacity: 1; background: var(--bg-blocked); color: var(--c-blocked); }
+.task-add-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.task-add-input {
+  flex: 1;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  font-size: 0.85rem;
+  color: var(--text);
+}
+.task-add-input:focus { outline: none; border-color: var(--accent); }
+
 /* ── Stats row ───────────────────────────────────────────────────── */
 .stats-row {
   display: grid;
