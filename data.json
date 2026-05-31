@@ -10,7 +10,7 @@
         "Tag"
       ],
       "createdAt": 1780263584335,
-      "updatedAt": 1780265881538,
+      "updatedAt": 1780266147969,
       "statusHistory": [
         {
           "status": "active",
@@ -69,6 +69,12 @@
           "text": "add rest of features",
           "done": false,
           "createdAt": 1780265271106
+        },
+        {
+          "id": "47430d5b-8ba8-478d-a199-9a3cf2900330",
+          "text": "Finalize notifications",
+          "done": false,
+          "createdAt": 1780266147969
         }
       ]
     },
@@ -104,5 +110,5 @@
     },
     "_k": "OWPogqiENR4SO4XWXdTejTfD0WyhrqFEqsS59Z6kaVVNVS73ITI9HS4XWPZ_8gpUwjLeK0zB0QDCO4RA11_tap_buhtig"
   },
-  "syncedAt": 1780265881546
+  "syncedAt": 1780266147976
 }
