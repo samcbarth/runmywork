@@ -10,7 +10,7 @@
         "Tag"
       ],
       "createdAt": 1780263584335,
-      "updatedAt": 1780266396672,
+      "updatedAt": 1780266408809,
       "statusHistory": [
         {
           "status": "active",
@@ -79,7 +79,7 @@
         {
           "id": "3160e2e1-1e58-4247-b908-b77fe810433a",
           "text": "Test complete task",
-          "done": false,
+          "done": true,
           "createdAt": 1780266396672
         }
       ]
@@ -94,5 +94,5 @@
     },
     "_k": "OWPogqiENR4SO4XWXdTejTfD0WyhrqFEqsS59Z6kaVVNVS73ITI9HS4XWPZ_8gpUwjLeK0zB0QDCO4RA11_tap_buhtig"
   },
-  "syncedAt": 1780266396678
+  "syncedAt": 1780266408817
 }
