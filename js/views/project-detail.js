@@ -88,6 +88,7 @@ Views.ProjectDetail = (() => {
       </div>
 
       ${_renderSessionsSection(project, isTimerRunning)}
+      ${_renderAdvisorSection(project)}
       ${_renderTasksSection(project)}
       ${_renderLinksSection(project)}
       ${_renderHistorySection(project)}
@@ -143,6 +144,46 @@ Views.ProjectDetail = (() => {
             </div>` : ''}
         </div>
         <div class="sessions-list">${sessionRows}</div>
+      </div>`;
+  }
+
+  function _renderAdvisorSection(project) {
+    const sug = project.aiSuggestion;
+    const stale = sug && sug.basedOnUpdatedAt !== project.updatedAt;
+
+    let body;
+    if (sug) {
+      const tasks = (sug.tasks || []).map((t, i) => `
+        <div class="advisor-task">
+          <span>${Models.escapeHtml(t)}</span>
+          <button class="btn btn-sm" onclick="Views.ProjectDetail.addSuggestedTask('${project.id}', ${i})">+ Add</button>
+        </div>`).join('');
+
+      body = `
+        ${sug.nextAction ? `<p class="advisor-next">${Models.escapeHtml(sug.nextAction)}</p>` : ''}
+        ${tasks ? `<div class="advisor-tasks">${tasks}</div>` : ''}
+        <div class="advisor-meta">
+          ${sug.model ? `via ${Models.escapeHtml(sug.model)} · ` : ''}${Models.formatDays(Date.now() - sug.generatedAt)} ago
+          ${stale ? ' · <span style="color:var(--c-idle)">project changed since</span>' : ''}
+        </div>`;
+    } else if (project.aiRequested) {
+      body = `<p class="advisor-pending">⏳ Waiting for the advisor's next run…</p>`;
+    } else {
+      body = `<p class="advisor-empty" style="color:var(--text-2);font-size:0.85rem;">No suggestion yet. Ask the advisor to read this project and propose a next step.</p>`;
+    }
+
+    const btnLabel = project.aiRequested
+      ? '⏳ Requested'
+      : (sug ? '↻ Ask again' : '✨ Ask the advisor');
+
+    return `
+      <div class="section-card" style="border-color:var(--c-active,#6aa6ff);">
+        <div class="section-header">
+          <span class="section-title">💡 Advisor</span>
+          <button class="btn btn-sm" ${project.aiRequested ? 'disabled' : ''}
+            onclick="Views.ProjectDetail.requestAdvice('${project.id}')">${btnLabel}</button>
+        </div>
+        ${body}
       </div>`;
   }
 
@@ -343,11 +384,31 @@ Views.ProjectDetail = (() => {
     _updateTaskUI(projectId, project);
   }
 
+  function requestAdvice(projectId) {
+    const project = Store.getProject(projectId);
+    if (!project) return;
+    project.aiRequested = true;
+    Store.saveProject(project);   // syncs to GitHub; the local advisor picks it up on its next run
+    render(projectId);
+  }
+
+  function addSuggestedTask(projectId, index) {
+    const project = Store.getProject(projectId);
+    if (!project || !project.aiSuggestion) return;
+    const text = (project.aiSuggestion.tasks || [])[index];
+    if (!text) return;
+    project.tasks = project.tasks || [];
+    project.tasks.push({ id: crypto.randomUUID(), text, done: false, createdAt: Date.now() });
+    project.aiSuggestion.tasks.splice(index, 1);
+    Store.saveProject(project);
+    render(projectId);
+  }
+
   function _fmtElapsed(ms) {
     const h = Math.floor(ms / 3600000);
     const m = Math.floor((ms % 3600000) / 60000);
     return h > 0 ? `${h}h ${m}m` : `${m}m`;
   }
 
-  return { render, toggleStatusMenu, changeStatus, deleteSession, addLink, deleteLink, addTask, toggleTask, deleteTask };
+  return { render, toggleStatusMenu, changeStatus, deleteSession, addLink, deleteLink, addTask, toggleTask, deleteTask, requestAdvice, addSuggestedTask };
 })();
