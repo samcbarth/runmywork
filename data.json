@@ -10,7 +10,7 @@
         "Tag"
       ],
       "createdAt": 1780263584335,
-      "updatedAt": 1780275660971,
+      "updatedAt": 1780275668959,
       "statusHistory": [
         {
           "status": "active",
@@ -95,7 +95,7 @@
         {
           "id": "e59b9a84-967f-4528-a589-a3627459b93c",
           "text": "Document the communication with Booty",
-          "done": false,
+          "done": true,
           "createdAt": 1780275660971
         }
       ],
@@ -121,5 +121,5 @@
     },
     "_k": "OWPogqiENR4SO4XWXdTejTfD0WyhrqFEqsS59Z6kaVVNVS73ITI9HS4XWPZ_8gpUwjLeK0zB0QDCO4RA11_tap_buhtig"
   },
-  "syncedAt": 1780275660979
+  "syncedAt": 1780275668966
 }
