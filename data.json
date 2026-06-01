@@ -116,6 +116,31 @@
         "basedOnUpdatedAt": 1780267088595
       },
       "aiRequested": false
+    },
+    {
+      "id": "b5c07b23-a27b-411e-8f80-dd721ca81025",
+      "title": "ReplyHandler",
+      "description": "",
+      "status": "active",
+      "priority": "medium",
+      "tags": [],
+      "createdAt": 1780325491953,
+      "updatedAt": 1780325491954,
+      "statusHistory": [
+        {
+          "status": "active",
+          "enteredAt": 1780325491953,
+          "note": ""
+        }
+      ],
+      "sessions": [],
+      "totalMinutes": 0,
+      "blockedReason": "",
+      "snoozedUntil": null,
+      "links": [],
+      "tasks": [],
+      "aiSuggestion": null,
+      "aiRequested": false
     }
   ],
   "settings": {
@@ -127,5 +152,5 @@
     },
     "_k": "OWPogqiENR4SO4XWXdTejTfD0WyhrqFEqsS59Z6kaVVNVS73ITI9HS4XWPZ_8gpUwjLeK0zB0QDCO4RA11_tap_buhtig"
   },
-  "syncedAt": 1780276788856
+  "syncedAt": 1780325491965
 }
