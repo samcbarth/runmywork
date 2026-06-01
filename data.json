@@ -127,7 +127,7 @@
         "communication"
       ],
       "createdAt": 1780325491953,
-      "updatedAt": 1780325656894,
+      "updatedAt": 1780325692482,
       "statusHistory": [
         {
           "status": "active",
@@ -149,7 +149,7 @@
         }
       ],
       "aiSuggestion": null,
-      "aiRequested": false
+      "aiRequested": true
     },
     {
       "id": "9f0fd4a0-152e-4b84-b25f-db81a01b3c51",
@@ -188,5 +188,5 @@
     },
     "_k": "OWPogqiENR4SO4XWXdTejTfD0WyhrqFEqsS59Z6kaVVNVS73ITI9HS4XWPZ_8gpUwjLeK0zB0QDCO4RA11_tap_buhtig"
   },
-  "syncedAt": 1780325656904
+  "syncedAt": 1780325692492
 }
