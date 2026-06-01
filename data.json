@@ -123,9 +123,11 @@
       "description": "This is my communication agent for my emails",
       "status": "active",
       "priority": "medium",
-      "tags": [],
+      "tags": [
+        "communication"
+      ],
       "createdAt": 1780325491953,
-      "updatedAt": 1780325636543,
+      "updatedAt": 1780325656894,
       "statusHistory": [
         {
           "status": "active",
@@ -186,5 +188,5 @@
     },
     "_k": "OWPogqiENR4SO4XWXdTejTfD0WyhrqFEqsS59Z6kaVVNVS73ITI9HS4XWPZ_8gpUwjLeK0zB0QDCO4RA11_tap_buhtig"
   },
-  "syncedAt": 1780325636551
+  "syncedAt": 1780325656904
 }
