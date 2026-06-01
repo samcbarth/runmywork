@@ -10,7 +10,7 @@
         "Tag"
       ],
       "createdAt": 1780263584335,
-      "updatedAt": 1780276768047,
+      "updatedAt": 1780276775987,
       "statusHistory": [
         {
           "status": "active",
@@ -71,7 +71,7 @@
         {
           "id": "b1a0cbd4-f4cc-4294-8c3a-218337a4e3a2",
           "text": "connect ollama",
-          "done": true,
+          "done": false,
           "createdAt": 1780265183506
         },
         {
@@ -97,6 +97,12 @@
           "text": "Document the communication with Booty",
           "done": true,
           "createdAt": 1780275660971
+        },
+        {
+          "id": "16cda4af-7f59-4931-9c56-b01cd589f766",
+          "text": "Update ollama models",
+          "done": false,
+          "createdAt": 1780276775987
         }
       ],
       "aiSuggestion": {
@@ -121,5 +127,5 @@
     },
     "_k": "OWPogqiENR4SO4XWXdTejTfD0WyhrqFEqsS59Z6kaVVNVS73ITI9HS4XWPZ_8gpUwjLeK0zB0QDCO4RA11_tap_buhtig"
   },
-  "syncedAt": 1780276768056
+  "syncedAt": 1780276775995
 }
