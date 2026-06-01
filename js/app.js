@@ -1,4 +1,7 @@
 const App = (() => {
+  // Bumped on each deploy so you can confirm which build is live (shown in Settings).
+  const BUILD = '2026-06-01 01:05';
+
   let _timerInterval = null;
   let _swRegistration = null;
 
@@ -140,6 +143,33 @@ const App = (() => {
     showSyncStatus(result.ok ? 'ok' : 'error');
   }
 
+  /* ── Force-update from the page (Settings → Check for updates) ── */
+
+  async function checkForUpdate() {
+    if (!('serviceWorker' in navigator)) {
+      // No SW — a plain reload is the best we can do.
+      location.reload(true);
+      return;
+    }
+    try {
+      // Wipe every cache so the next fetch pulls fresh files from the network.
+      if (window.caches) {
+        const keys = await caches.keys();
+        await Promise.all(keys.map(k => caches.delete(k)));
+      }
+      const reg = await navigator.serviceWorker.getRegistration();
+      if (reg) {
+        await reg.update();
+        if (reg.waiting) reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+        await reg.unregister();   // drop the controlling SW so the reload is clean
+      }
+    } catch { /* fall through to reload */ }
+    // Cache-busting reload.
+    location.replace(location.pathname + '?u=' + Date.now() + location.hash);
+  }
+
+  function getBuild() { return BUILD; }
+
   /* ── Init ── */
 
   async function init() {
@@ -162,5 +192,5 @@ const App = (() => {
 
   document.addEventListener('DOMContentLoaded', init);
 
-  return { navigate, openModal, openModalFull, closeModal, startGlobalTimer, stopGlobalTimer, syncPush };
+  return { navigate, openModal, openModalFull, closeModal, startGlobalTimer, stopGlobalTimer, syncPush, checkForUpdate, getBuild };
 })();

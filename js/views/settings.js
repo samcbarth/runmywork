@@ -77,6 +77,21 @@ Views.Settings = (() => {
         </div>
       </div>
 
+      <!-- ── App version ── -->
+      <div class="settings-section">
+        <div class="settings-section-title">App version</div>
+        <div class="setting-row">
+          <div class="setting-info">
+            <div class="setting-label">Current build</div>
+            <div class="setting-desc">Last code update this app loaded: <strong>${App.getBuild()}</strong></div>
+          </div>
+          <button class="btn btn-sm" id="update-btn">Check for updates</button>
+        </div>
+        <p style="font-size:0.78rem;color:var(--text-2);margin-top:4px;line-height:1.6;">
+          Clears the cached app code and reloads with the latest version from the server.
+        </p>
+      </div>
+
       <p style="font-size:0.75rem;color:var(--text-2);text-align:center;margin-top:8px;" id="project-count"></p>
     `;
 
@@ -99,6 +114,13 @@ Views.Settings = (() => {
     });
 
     document.getElementById('save-notif-btn').addEventListener('click', _saveNotifSettings);
+
+    const updateBtn = document.getElementById('update-btn');
+    if (updateBtn) updateBtn.addEventListener('click', () => {
+      updateBtn.textContent = '⟳ Updating…';
+      updateBtn.disabled = true;
+      App.checkForUpdate();
+    });
   }
 
   async function _saveGithubConfig() {

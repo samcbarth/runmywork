@@ -1,4 +1,4 @@
-const CACHE = 'runmywork-v16';
+const CACHE = 'runmywork-v17';
 const PRECACHE = [
   './',
   './index.html',
@@ -31,11 +31,28 @@ self.addEventListener('activate', e => {
   );
 });
 
+// Network-first for app code so new deploys show up on reload; fall back to
+// cache when offline. The cache is refreshed in the background on every hit.
 self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
+  const url = new URL(e.request.url);
+  // Only manage same-origin requests; let GitHub/ntfy/etc. pass straight through.
+  if (url.origin !== self.location.origin) return;
+
   e.respondWith(
-    caches.match(e.request).then(cached => cached || fetch(e.request))
+    fetch(e.request)
+      .then(res => {
+        const copy = res.clone();
+        caches.open(CACHE).then(c => c.put(e.request, copy)).catch(() => {});
+        return res;
+      })
+      .catch(() => caches.match(e.request).then(c => c || caches.match('./index.html')))
   );
+});
+
+// Let the page force an immediate update (the "Check for updates" button).
+self.addEventListener('message', e => {
+  if (e.data?.type === 'SKIP_WAITING') self.skipWaiting();
 });
 
 /* ── Notifications from page ── */
