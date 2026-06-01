@@ -127,7 +127,7 @@
         "communication"
       ],
       "createdAt": 1780325491953,
-      "updatedAt": 1780325692482,
+      "updatedAt": 1780326149038,
       "statusHistory": [
         {
           "status": "active",
@@ -146,6 +146,12 @@
           "text": "Update ollama model for better responses",
           "done": false,
           "createdAt": 1780325556185
+        },
+        {
+          "id": "d189400e-a742-4f43-83ca-e7310a161d06",
+          "text": "Drafts older than a day can be deleted",
+          "done": false,
+          "createdAt": 1780326149038
         }
       ],
       "aiSuggestion": null,
@@ -188,5 +194,5 @@
     },
     "_k": "OWPogqiENR4SO4XWXdTejTfD0WyhrqFEqsS59Z6kaVVNVS73ITI9HS4XWPZ_8gpUwjLeK0zB0QDCO4RA11_tap_buhtig"
   },
-  "syncedAt": 1780325692492
+  "syncedAt": 1780326149045
 }
