@@ -61,6 +61,53 @@ create policy "anon all projects" on public.projects for all to anon using (true
 create policy "anon all settings" on public.settings for all to anon using (true) with check (true);
 ```
 
+### Agent rails (Phase 1): worklog + approvals
+
+The advisor doesn't silently change your projects. It **proposes** actionable
+changes (add tasks, set status, …) that land in an **approvals inbox**; you
+approve or reject each one in the app. Approving applies it and records the move
+in an append-only **worklog** (the agent's journal). Run this once too:
+
+```sql
+create table public.worklog (
+  id uuid primary key default gen_random_uuid(),
+  project_id uuid not null references public.projects(id) on delete cascade,
+  kind       text not null default 'note',       -- observation | proposal | action | note
+  summary    text not null default '',
+  detail     jsonb not null default '{}',
+  created_by text not null default 'system',      -- advisor | user | system
+  created_at bigint not null
+);
+create index worklog_project_idx on public.worklog (project_id, created_at desc);
+
+create table public.approvals (
+  id uuid primary key default gen_random_uuid(),
+  project_id  uuid not null references public.projects(id) on delete cascade,
+  action_type text not null,                      -- add_tasks | set_status | set_priority | add_link
+  payload     jsonb not null default '{}',
+  rationale   text not null default '',
+  status      text not null default 'pending',    -- pending | approved | rejected | applied
+  created_by  text not null default 'advisor',
+  created_at  bigint not null,
+  decided_at  bigint
+);
+create index approvals_status_idx on public.approvals (status, created_at desc);
+
+alter table public.worklog   enable row level security;
+alter table public.approvals enable row level security;
+create policy "anon all worklog"   on public.worklog   for all to anon using (true) with check (true);
+create policy "anon all approvals" on public.approvals for all to anon using (true) with check (true);
+```
+
+`on delete cascade` cleans a project's worklog + approvals automatically when the
+project is deleted.
+
+**The loop:** advisor run → writes `approvals` rows (`status='pending'`) + a
+`worklog` `proposal` entry → the app's 📥 inbox shows them → you Approve (the app
+applies the change app-side via the normal Store path and logs a `worklog`
+`action`) or Reject. Repeated scheduled runs dedup against existing pending rows,
+so they don't pile duplicates.
+
 Then, from **Settings → API**, copy your **Project URL** + **anon key** into
 `js/store.js` (the `SUPABASE_URL` / `SUPABASE_ANON_KEY` constants in the `Sync`
 module). The **service_role key** stays on this box only — never commit it.

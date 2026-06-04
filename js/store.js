@@ -2,7 +2,8 @@ const Store = (() => {
   const KEYS = {
     projects:   'tracker_projects',
     settings:   'tracker_settings',
-    session:    'tracker_active_session'
+    session:    'tracker_active_session',
+    approvals:  'tracker_approvals'
   };
 
   const DEFAULT_SETTINGS = {
@@ -38,15 +39,14 @@ const Store = (() => {
     }
     _saveProjects(projects);
     _writeNotifyCache(project);
-    setTimeout(() => App.syncPush(), 0);
+    setTimeout(() => App.syncPushProject(project.id), 0);
     return project;
   }
 
   function deleteProject(id) {
     _saveProjects(getProjects().filter(p => p.id !== id));
     _deleteNotifyCache(id);
-    Sync.remove(id);                       // upserts never delete — drop the row explicitly
-    setTimeout(() => App.syncPush(), 0);
+    Sync.remove(id);   // upserts never delete — drop the row (cascades worklog/approvals)
   }
 
   /* ── Sessions ── */
@@ -66,7 +66,7 @@ const Store = (() => {
 
     _saveProjects(projects);
     _writeNotifyCache(project);
-    setTimeout(() => App.syncPush(), 0);
+    setTimeout(() => App.syncPushProject(project.id), 0);
     return project;
   }
 
@@ -80,7 +80,7 @@ const Store = (() => {
     project.updatedAt = Date.now();
 
     _saveProjects(projects);
-    setTimeout(() => App.syncPush(), 0);
+    setTimeout(() => App.syncPushProject(project.id), 0);
     return project;
   }
 
@@ -129,6 +129,17 @@ const Store = (() => {
     localStorage.setItem(KEYS.settings, JSON.stringify(settings));
   }
 
+  /* ── Approvals cache (pending agent proposals) ── */
+
+  function getApprovals() {
+    try { return JSON.parse(localStorage.getItem(KEYS.approvals) || '[]'); }
+    catch { return []; }
+  }
+
+  function _saveApprovals(approvals) {
+    localStorage.setItem(KEYS.approvals, JSON.stringify(approvals || []));
+  }
+
   /* ── Active session (timer) ── */
 
   function getActiveSession() {
@@ -161,6 +172,7 @@ const Store = (() => {
     localStorage.removeItem(KEYS.projects);
     localStorage.removeItem(KEYS.settings);
     localStorage.removeItem(KEYS.session);
+    localStorage.removeItem(KEYS.approvals);
     _clearNotifyCache();
   }
 
@@ -207,12 +219,30 @@ const Store = (() => {
     } catch { /* silent */ }
   }
 
+  // Rewrite the whole notify cache from current projects. Called after Sync.pull
+  // so a freshly-synced device/SW has data before the user edits anything (the
+  // per-save _writeNotifyCache only covers locally-edited projects).
+  async function refreshNotifyCache() {
+    try {
+      const db = await _openNotifyDB();
+      const tx = db.transaction('notify_cache', 'readwrite');
+      const store = tx.objectStore('notify_cache');
+      store.clear();
+      getProjects().forEach(p => store.put({
+        id: p.id, title: p.title, status: p.status,
+        statusHistory: p.statusHistory, snoozedUntil: p.snoozedUntil,
+        blockedReason: p.blockedReason
+      }));
+    } catch { /* silent */ }
+  }
+
   return {
     getProjects, getProject, saveProject, deleteProject,
     addSession, deleteSession, runAutoIdleDetection,
     getSettings, saveSettings,
+    getApprovals, _saveApprovals,
     getActiveSession, saveActiveSession, clearActiveSession,
-    exportData, importData, clearAll,
+    exportData, importData, clearAll, refreshNotifyCache,
     KEYS
   };
 })();
@@ -291,14 +321,16 @@ const Sync = (() => {
   async function pull() {
     if (!isConfigured()) return { ok: false, reason: 'not-configured' };
     try {
-      const [pRes, sRes] = await Promise.all([
+      const [pRes, sRes, aRes] = await Promise.all([
         _fetchWithTimeout(`${REST}/projects?select=*`, { headers: HEADERS }),
-        _fetchWithTimeout(`${REST}/settings?id=eq.1&select=*`, { headers: HEADERS })
+        _fetchWithTimeout(`${REST}/settings?id=eq.1&select=*`, { headers: HEADERS }),
+        _fetchWithTimeout(`${REST}/approvals?status=eq.pending&select=*&order=created_at.desc`, { headers: HEADERS })
       ]);
       if (!pRes.ok) return { ok: false, reason: `http-${pRes.status}` };
       const projectRows = await pRes.json();
       const settingsRow = sRes.ok ? (await sRes.json())[0] : null;
       _applyData(projectRows, settingsRow);
+      if (aRes.ok) Store._saveApprovals(await aRes.json());
       return { ok: true };
     } catch (e) {
       return { ok: false, reason: e.name === 'AbortError' ? 'timeout' : e.message };
@@ -344,6 +376,26 @@ const Sync = (() => {
     }
   }
 
+  // Single-project upsert — pushes only the row that changed, so a save can
+  // never resurrect another device's project from a stale full snapshot (the
+  // cross-project clobber that whole-document push() risks). Within one project
+  // it's still last-write-wins, which is fine for a single user.
+  async function pushProject(id) {
+    if (!isConfigured()) return { ok: false, reason: 'not-configured' };
+    const project = Store.getProject(id);
+    if (!project) return { ok: false, reason: 'no-such-project' };
+    try {
+      const res = await _fetchWithTimeout(`${REST}/projects?on_conflict=id`, {
+        method: 'POST',
+        headers: { ...HEADERS, Prefer: 'resolution=merge-duplicates,return=minimal' },
+        body: JSON.stringify([projectToRow(project)])
+      });
+      return { ok: res.ok, reason: res.ok ? undefined : `http-${res.status}` };
+    } catch (e) {
+      return { ok: false, reason: e.name === 'AbortError' ? 'timeout' : e.message };
+    }
+  }
+
   // Upserts never delete, so a removed project must be dropped explicitly or the
   // next pull() resurrects it. Called from Store.deleteProject.
   async function remove(id) {
@@ -359,5 +411,71 @@ const Sync = (() => {
     }
   }
 
-  return { pull, push, remove, isConfigured, rowToProject, projectToRow, NTFY_TOPIC };
+  /* ── Agent rails: approvals + worklog ──────────────────────────── */
+
+  // Refresh the pending-proposals cache from the server.
+  async function pullApprovals() {
+    if (!isConfigured()) return { ok: false, reason: 'not-configured' };
+    try {
+      const res = await _fetchWithTimeout(
+        `${REST}/approvals?status=eq.pending&select=*&order=created_at.desc`, { headers: HEADERS });
+      if (!res.ok) return { ok: false, reason: `http-${res.status}` };
+      Store._saveApprovals(await res.json());
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, reason: e.name === 'AbortError' ? 'timeout' : e.message };
+    }
+  }
+
+  // Mark a proposal approved / rejected / applied. Also drops it from the local
+  // pending cache so the UI updates without a round-trip.
+  async function decideApproval(id, status) {
+    if (!isConfigured()) return { ok: false, reason: 'not-configured' };
+    Store._saveApprovals(Store.getApprovals().filter(a => a.id !== id));
+    try {
+      const res = await _fetchWithTimeout(`${REST}/approvals?id=eq.${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        headers: { ...HEADERS, Prefer: 'return=minimal' },
+        body: JSON.stringify({ status, decided_at: Date.now() })
+      });
+      return { ok: res.ok, reason: res.ok ? undefined : `http-${res.status}` };
+    } catch (e) {
+      return { ok: false, reason: e.name === 'AbortError' ? 'timeout' : e.message };
+    }
+  }
+
+  // Append an entry to a project's worklog (the agent's journal). Fire-and-forget.
+  async function addWorklog(entry) {
+    if (!isConfigured()) return { ok: false, reason: 'not-configured' };
+    try {
+      const res = await _fetchWithTimeout(`${REST}/worklog`, {
+        method: 'POST',
+        headers: { ...HEADERS, Prefer: 'return=minimal' },
+        body: JSON.stringify([{ created_at: Date.now(), created_by: 'user', kind: 'note', detail: {}, summary: '', ...entry }])
+      });
+      return { ok: res.ok, reason: res.ok ? undefined : `http-${res.status}` };
+    } catch (e) {
+      return { ok: false, reason: e.name === 'AbortError' ? 'timeout' : e.message };
+    }
+  }
+
+  // Lazy-load one project's recent worklog (project-detail opens this on demand).
+  async function pullWorklog(projectId, limit = 50) {
+    if (!isConfigured()) return { ok: false, reason: 'not-configured', entries: [] };
+    try {
+      const res = await _fetchWithTimeout(
+        `${REST}/worklog?project_id=eq.${encodeURIComponent(projectId)}&order=created_at.desc&limit=${limit}`,
+        { headers: HEADERS });
+      if (!res.ok) return { ok: false, reason: `http-${res.status}`, entries: [] };
+      return { ok: true, entries: await res.json() };
+    } catch (e) {
+      return { ok: false, reason: e.name === 'AbortError' ? 'timeout' : e.message, entries: [] };
+    }
+  }
+
+  return {
+    pull, push, pushProject, remove,
+    pullApprovals, decideApproval, addWorklog, pullWorklog,
+    isConfigured, rowToProject, projectToRow, NTFY_TOPIC
+  };
 })();

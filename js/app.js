@@ -1,6 +1,6 @@
 const App = (() => {
   // Bumped on each deploy so you can confirm which build is live (shown in Settings).
-  const BUILD = '2026-06-01 01:05';
+  const BUILD = '2026-06-03 · agent-rails';
 
   let _timerInterval = null;
   let _swRegistration = null;
@@ -11,12 +11,20 @@ const App = (() => {
     location.hash = path;
   }
 
+  // Re-render whatever view is currently routed (used after an async state change
+  // like approving a proposal, so the right view refreshes without knowing which).
+  function refresh() {
+    _handleRoute();
+  }
+
   function _handleRoute() {
     const hash = location.hash.replace(/^#\/?/, '') || '';
     App.closeModal();
 
     if (hash === '' || hash === 'dashboard') {
       Views.Dashboard.render();
+    } else if (hash === 'approvals') {
+      Views.Approvals.render();
     } else if (hash === 'settings') {
       Views.Settings.render();
     } else if (hash.startsWith('project/')) {
@@ -143,6 +151,16 @@ const App = (() => {
     showSyncStatus(result.ok ? 'ok' : 'error');
   }
 
+  // Push only the project that changed — avoids the cross-project clobber of a
+  // full whole-document push (see Sync.pushProject). Falls back to silence when
+  // sync isn't configured (offline-only mode).
+  async function syncPushProject(id) {
+    if (!Sync.isConfigured()) return;
+    showSyncStatus('syncing');
+    const result = await Sync.pushProject(id);
+    showSyncStatus(result.ok ? 'ok' : 'error');
+  }
+
   /* ── Force-update from the page (Settings → Check for updates) ── */
 
   async function checkForUpdate() {
@@ -185,11 +203,13 @@ const App = (() => {
     showSyncStatus('pulling');
     const result = await Sync.pull();
     showSyncStatus(result.ok ? 'ok' : 'error');
+    if (result.ok) Store.refreshNotifyCache();   // seed SW cache from synced data
+    Views.Approvals.updateBadge();
 
     _handleRoute();
   }
 
   document.addEventListener('DOMContentLoaded', init);
 
-  return { navigate, openModal, openModalFull, closeModal, startGlobalTimer, stopGlobalTimer, syncPush, checkForUpdate, getBuild };
+  return { navigate, refresh, openModal, openModalFull, closeModal, startGlobalTimer, stopGlobalTimer, syncPush, syncPushProject, checkForUpdate, getBuild };
 })();
