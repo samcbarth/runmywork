@@ -1,5 +1,3 @@
-const Views = window.Views || {};
-
 Views.Approvals = (() => {
 
   /* Human-readable one-liner for a proposal's payload. */
