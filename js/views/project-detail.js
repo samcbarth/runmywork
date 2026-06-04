@@ -92,6 +92,7 @@ Views.ProjectDetail = (() => {
       ${_renderTasksSection(project)}
       ${_renderLinksSection(project)}
       ${_renderHistorySection(project)}
+      ${_renderWorklogSection(project)}
 
       <div style="margin-top:20px;text-align:center;">
         <button class="btn btn-ghost btn-sm" onclick="Views.ProjectForm.confirmDelete('${id}')" style="color:var(--c-blocked)">Delete project</button>
@@ -151,17 +152,22 @@ Views.ProjectDetail = (() => {
     const sug = project.aiSuggestion;
     const stale = sug && sug.basedOnUpdatedAt !== project.updatedAt;
 
+    // Pending proposals for THIS project — actionable changes the user gates.
+    const proposals = Store.getApprovals().filter(a => a.project_id === project.id);
+    const proposalRows = proposals.map(a => `
+      <div class="advisor-task" style="flex-direction:column;align-items:stretch;gap:6px;">
+        <span><strong>${Models.escapeHtml(_proposalSummary(a))}</strong></span>
+        ${_proposalDetail(a)}
+        <div style="display:flex;gap:8px;">
+          <button class="btn btn-sm btn-success" onclick="Views.ProjectDetail.decideProposal('${a.id}','approve')">✓ Approve</button>
+          <button class="btn btn-sm btn-danger" onclick="Views.ProjectDetail.decideProposal('${a.id}','reject')">✕ Reject</button>
+        </div>
+      </div>`).join('');
+
     let body;
     if (sug) {
-      const tasks = (sug.tasks || []).map((t, i) => `
-        <div class="advisor-task">
-          <span>${Models.escapeHtml(t)}</span>
-          <button class="btn btn-sm" onclick="Views.ProjectDetail.addSuggestedTask('${project.id}', ${i})">+ Add</button>
-        </div>`).join('');
-
       body = `
         ${sug.nextAction ? `<p class="advisor-next">${Models.escapeHtml(sug.nextAction)}</p>` : ''}
-        ${tasks ? `<div class="advisor-tasks">${tasks}</div>` : ''}
         <div class="advisor-meta">
           ${sug.model ? `via ${Models.escapeHtml(sug.model)} · ` : ''}${Models.formatDays(Date.now() - sug.generatedAt)} ago
           ${stale ? ' · <span style="color:var(--c-idle)">project changed since</span>' : ''}
@@ -184,6 +190,41 @@ Views.ProjectDetail = (() => {
             onclick="Views.ProjectDetail.requestAdvice('${project.id}')">${btnLabel}</button>
         </div>
         ${body}
+        ${proposalRows ? `<div class="advisor-tasks" style="margin-top:10px;"><div style="font-size:0.78rem;color:var(--text-2);margin-bottom:6px;">Proposals awaiting your approval</div>${proposalRows}</div>` : ''}
+      </div>`;
+  }
+
+  function _proposalSummary(a) {
+    const p = a.payload || {};
+    switch (a.action_type) {
+      case 'add_tasks':    return `Add ${Array.isArray(p.tasks) ? p.tasks.length : 0} task(s)`;
+      case 'set_status':   return `Set status → ${p.status}`;
+      case 'set_priority': return `Set priority → ${p.priority}`;
+      case 'add_link':     return `Add link: ${p.label || p.url || ''}`;
+      default:             return a.action_type;
+    }
+  }
+
+  function _proposalDetail(a) {
+    const p = a.payload || {};
+    if (a.action_type === 'add_tasks' && Array.isArray(p.tasks) && p.tasks.length) {
+      return `<ul class="approval-detail-list" style="margin:0;padding-left:18px;">${p.tasks.map(t => `<li>${Models.escapeHtml(t)}</li>`).join('')}</ul>`;
+    }
+    if (a.rationale) return `<span style="font-size:0.82rem;color:var(--text-2);">${Models.escapeHtml(a.rationale)}</span>`;
+    return '';
+  }
+
+  function _renderWorklogSection(project) {
+    return `
+      <div class="section-card">
+        <div class="section-header">
+          <span class="section-title">Worklog</span>
+          <button class="btn btn-sm" id="worklog-load-${project.id}"
+            onclick="Views.ProjectDetail.loadWorklog('${project.id}')">Load</button>
+        </div>
+        <div class="worklog-list" id="worklog-list-${project.id}">
+          <p style="color:var(--text-2);font-size:0.85rem;">The agent's journal for this project — proposals, actions, notes.</p>
+        </div>
       </div>`;
   }
 
@@ -388,20 +429,38 @@ Views.ProjectDetail = (() => {
     const project = Store.getProject(projectId);
     if (!project) return;
     project.aiRequested = true;
-    Store.saveProject(project);   // syncs to GitHub; the local advisor picks it up on its next run
+    Store.saveProject(project);   // syncs to Supabase; the local advisor picks it up on its next run
     render(projectId);
   }
 
-  function addSuggestedTask(projectId, index) {
-    const project = Store.getProject(projectId);
-    if (!project || !project.aiSuggestion) return;
-    const text = (project.aiSuggestion.tasks || [])[index];
-    if (!text) return;
-    project.tasks = project.tasks || [];
-    project.tasks.push({ id: crypto.randomUUID(), text, done: false, createdAt: Date.now() });
-    project.aiSuggestion.tasks.splice(index, 1);
-    Store.saveProject(project);
-    render(projectId);
+  // Approve/reject a proposal inline — delegates to the shared Approvals logic
+  // (apply + worklog + decide), then re-renders this project view.
+  async function decideProposal(approvalId, action) {
+    if (action === 'approve') await Views.Approvals.approve(approvalId);
+    else                      await Views.Approvals.reject(approvalId);
+    // Approvals.* calls App.refresh(), which re-renders this view from the hash.
+  }
+
+  async function loadWorklog(projectId) {
+    const list = document.getElementById(`worklog-list-${projectId}`);
+    const btn  = document.getElementById(`worklog-load-${projectId}`);
+    if (!list) return;
+    if (btn) { btn.disabled = true; btn.textContent = 'Loading…'; }
+
+    const { ok, entries } = await Sync.pullWorklog(projectId);
+    if (btn) { btn.disabled = false; btn.textContent = '↻ Reload'; }
+
+    if (!ok) { list.innerHTML = '<p style="color:var(--c-blocked);font-size:0.85rem;">Could not load worklog.</p>'; return; }
+    if (!entries.length) { list.innerHTML = '<p style="color:var(--text-2);font-size:0.85rem;">No entries yet.</p>'; return; }
+
+    const icon = { proposal: '💡', action: '✓', observation: '👁', note: '•' };
+    list.innerHTML = entries.map(e => `
+      <div class="history-item">
+        <div class="history-content">
+          <div class="history-status">${icon[e.kind] || '•'} ${Models.escapeHtml(e.summary || e.kind)}</div>
+          <div class="history-date">${Models.formatDateTime(e.created_at)} · ${Models.escapeHtml(e.created_by || '')}</div>
+        </div>
+      </div>`).join('');
   }
 
   function _fmtElapsed(ms) {
@@ -410,5 +469,5 @@ Views.ProjectDetail = (() => {
     return h > 0 ? `${h}h ${m}m` : `${m}m`;
   }
 
-  return { render, toggleStatusMenu, changeStatus, deleteSession, addLink, deleteLink, addTask, toggleTask, deleteTask, requestAdvice, addSuggestedTask };
+  return { render, toggleStatusMenu, changeStatus, deleteSession, addLink, deleteLink, addTask, toggleTask, deleteTask, requestAdvice, decideProposal, loadWorklog };
 })();

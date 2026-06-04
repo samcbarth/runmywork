@@ -95,20 +95,56 @@ async function writeSuggestion(project) {
   if (!res.ok) throw new Error(`Supabase PATCH failed: ${res.status} ${res.statusText}`);
 }
 
+/* ── Agent rails: approvals + worklog ────────────────────────────── */
+
+// Pending proposals for one project — used to dedup so repeated scheduled runs
+// don't pile identical proposals.
+async function pendingApprovals(projectId) {
+  const res = await fetchJson(
+    `${REST}/approvals?project_id=eq.${encodeURIComponent(projectId)}&status=eq.pending&select=action_type,payload`,
+    { headers: sbHeaders() });
+  if (!res.ok) return [];
+  return res.json();
+}
+
+async function createApproval(row) {
+  const res = await fetchJson(`${REST}/approvals`, {
+    method: 'POST',
+    headers: { ...sbHeaders(), Prefer: 'return=minimal' },
+    body: JSON.stringify([row])
+  });
+  if (!res.ok) throw new Error(`approvals POST failed: ${res.status} ${res.statusText}`);
+}
+
+async function addWorklog(entry) {
+  const res = await fetchJson(`${REST}/worklog`, {
+    method: 'POST',
+    headers: { ...sbHeaders(), Prefer: 'return=minimal' },
+    body: JSON.stringify([{ created_at: Date.now(), created_by: 'advisor', kind: 'note', summary: '', detail: {}, ...entry }])
+  });
+  if (!res.ok) throw new Error(`worklog POST failed: ${res.status} ${res.statusText}`);
+}
+
 /* ── Ollama ──────────────────────────────────────────────────────── */
 
 const SYSTEM_PROMPT =
 `You are a focused work advisor inside a personal project hub. The user tracks
 many projects of all kinds — software, writing, research, planning, life admin.
-For one project at a time you read its current state and return the single most
-useful next action plus a few concrete tasks.
+For one project at a time you read its current state and propose the single most
+useful next action, a few concrete tasks, and (only when clearly warranted) a
+status change. Your proposals are NOT applied automatically — the user approves
+or rejects each one, so be deliberate.
 
 Rules:
 - Be specific and actionable. No pep talk, no restating the obvious.
 - "nextAction" is one short sentence: the very next concrete step to move it forward.
 - "tasks" is 0-4 short, concrete to-do items (each a few words). Omit ones already listed.
 - If the project is blocked, focus on how to get unblocked.
-- Respond with ONLY a JSON object: {"nextAction": string, "tasks": string[]}.`;
+- "statusChange" is OPTIONAL: include it only if the status clearly should change
+  (e.g. an "idle" project with a clear next step should be "active"; a finished
+  one "done"). Allowed values: "active", "blocked", "idle", "done". Omit it otherwise.
+- Respond with ONLY a JSON object:
+  {"nextAction": string, "tasks": string[], "statusChange"?: string}.`;
 
 function buildUserPrompt(project) {
   const openTasks = (project.tasks || []).filter(t => !t.done).map(t => t.text);
@@ -156,8 +192,12 @@ async function askOllama(project) {
   let tasks = Array.isArray(parsed.tasks) ? parsed.tasks : [];
   tasks = tasks.filter(t => typeof t === 'string' && t.trim()).map(t => t.trim()).slice(0, 4);
 
+  const allowed = ['active', 'blocked', 'idle', 'done'];
+  const sc = typeof parsed.statusChange === 'string' ? parsed.statusChange.trim().toLowerCase() : '';
+  const statusChange = allowed.includes(sc) ? sc : null;
+
   if (!nextAction && tasks.length === 0) throw new Error('Empty suggestion');
-  return { nextAction, tasks };
+  return { nextAction, tasks, statusChange };
 }
 
 /* ── main ────────────────────────────────────────────────────────── */
@@ -173,7 +213,7 @@ function needsAdvice(project) {
 }
 
 async function main() {
-  log(`model=${MODEL} host=${OLLAMA_HOST} repo=${REPO}${FORCE ? ' (force)' : ''}`);
+  log(`model=${MODEL} host=${OLLAMA_HOST}${FORCE ? ' (force)' : ''}`);
 
   // Quick reachability check so we fail fast & clearly if Ollama is down.
   try {
@@ -198,18 +238,54 @@ async function main() {
   for (const project of targets) {
     try {
       log(`→ ${project.title}`);
-      const { nextAction, tasks } = await askOllama(project);
+      const { nextAction, tasks, statusChange } = await askOllama(project);
+
+      // The human-readable headline still lives on the project card.
       project.aiSuggestion = {
         nextAction,
-        tasks,
         model: MODEL,
         generatedAt: Date.now(),
         basedOnUpdatedAt: project.updatedAt
       };
       project.aiRequested = false;
       await writeSuggestion(project);
+
+      // Actionable changes become approval proposals, gated by the user.
+      const pending = await pendingApprovals(project.id);
+      const hasPending = type => pending.some(a => a.action_type === type);
+      const now = Date.now();
+      const proposed = [];
+
+      if (tasks.length && !hasPending('add_tasks')) {
+        await createApproval({
+          project_id: project.id, action_type: 'add_tasks',
+          payload: { tasks }, rationale: nextAction, status: 'pending',
+          created_by: 'advisor', created_at: now
+        });
+        proposed.push(`add ${tasks.length} task(s)`);
+      }
+
+      if (statusChange && statusChange !== project.status
+          && !pending.some(a => a.action_type === 'set_status' && a.payload?.status === statusChange)) {
+        await createApproval({
+          project_id: project.id, action_type: 'set_status',
+          payload: { status: statusChange, note: 'Advisor-proposed' },
+          rationale: nextAction, status: 'pending',
+          created_by: 'advisor', created_at: now
+        });
+        proposed.push(`→ ${statusChange}`);
+      }
+
+      if (proposed.length) {
+        await addWorklog({
+          project_id: project.id, kind: 'proposal',
+          summary: nextAction || 'Proposed changes',
+          detail: { tasks, statusChange }, created_at: now
+        });
+      }
+
       changed++;
-      log(`   ${nextAction || '(tasks only)'}`);
+      log(`   ${nextAction || '(tasks only)'}${proposed.length ? ' — proposed: ' + proposed.join(', ') : ' (no new proposals)'}`);
     } catch (e) {
       console.warn(`   skipped — ${e.message}`);
     }
@@ -220,7 +296,7 @@ async function main() {
     return;
   }
 
-  log(`Wrote ${changed} suggestion(s) back to Supabase.`);
+  log(`Reviewed ${changed} project(s); wrote suggestions + proposals to Supabase.`);
 }
 
 main().catch(e => { console.error('Advisor failed:', e.message); process.exit(1); });

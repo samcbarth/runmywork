@@ -39,6 +39,7 @@ Views.Dashboard = (() => {
       </div>
     `;
 
+    Views.Approvals.updateBadge();
     _attachEvents();
   }
 
@@ -113,6 +114,7 @@ Views.Dashboard = (() => {
         <div class="card-footer">
           <span class="time-invested">⏱ ${invested}</span>
           ${(() => { const tasks = project.tasks || []; const rem = tasks.filter(t => !t.done).length; return rem > 0 ? `<span class="task-badge">${rem} task${rem !== 1 ? 's' : ''} left</span>` : ''; })()}
+          ${(() => { const n = Store.getApprovals().filter(a => a.project_id === project.id).length; return n > 0 ? `<span class="task-badge" style="background:var(--bg-active,rgba(106,166,255,.15));" title="Proposals awaiting approval" onclick="event.stopPropagation();App.navigate('approvals')">📥 ${n} proposal${n !== 1 ? 's' : ''}</span>` : ''; })()}
           ${project.aiSuggestion ? '<span class="task-badge" title="Advisor suggestion available">💡</span>' : ''}
           <div class="card-actions">${_renderCardActions(project, isTimerRunning)}</div>
         </div>

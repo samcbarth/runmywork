@@ -72,9 +72,10 @@ function notify(title, body, priority) {
 }
 
 async function main() {
-  const [pRes, sRes] = await Promise.all([
+  const [pRes, sRes, aRes] = await Promise.all([
     fetch(`${REST}/projects?select=*`, { headers: sbHeaders() }),
-    fetch(`${REST}/settings?id=eq.1&select=*`, { headers: sbHeaders() })
+    fetch(`${REST}/settings?id=eq.1&select=*`, { headers: sbHeaders() }),
+    fetch(`${REST}/approvals?status=eq.pending&select=id`, { headers: sbHeaders() })
   ]);
   if (!pRes.ok) { console.error(`Supabase GET failed: ${pRes.status}`); process.exit(1); }
 
@@ -108,6 +109,16 @@ async function main() {
         priority: 'default'
       });
     }
+  }
+
+  // Nudge about agent proposals waiting in the approvals inbox.
+  const pendingApprovals = aRes && aRes.ok ? (await aRes.json()).length : 0;
+  if (pendingApprovals > 0) {
+    alerts.push({
+      title:    'Proposals waiting',
+      body:     `${pendingApprovals} agent proposal${pendingApprovals !== 1 ? 's' : ''} awaiting your approval`,
+      priority: 'default'
+    });
   }
 
   if (alerts.length === 0) {
