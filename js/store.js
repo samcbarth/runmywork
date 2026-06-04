@@ -224,8 +224,8 @@ const Sync = (() => {
   // synced with zero setup. The anon key is SAFE to embed — Row Level Security
   // governs access. NEVER put the service_role key (or any secret) here.
   // ↓↓↓ Fill these in from your Supabase project (Settings → API). ↓↓↓
-  const SUPABASE_URL      = 'https://YOUR-PROJECT-REF.supabase.co';
-  const SUPABASE_ANON_KEY = 'YOUR-ANON-KEY';
+  const SUPABASE_URL      = 'https://tmqffprfhavzbaycvxej.supabase.co';
+  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRtcWZmcHJmaGF2emJheWN2eGVqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1NDE1MTQsImV4cCI6MjA5NjExNzUxNH0.rtcPzaPwo2qMYJdm_sdpOvjEuEuK0O0I6r-pPrqCma4';
 
   const NTFY_TOPIC = 'rmw-sam-9k2x7p';   // hardcoded — subscribe to this in the ntfy app
 
