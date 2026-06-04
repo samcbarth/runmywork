@@ -48,7 +48,7 @@ const Notifications = (() => {
   }
 
   async function _sendNtfy(title, body, priority) {
-    await fetch(`https://ntfy.sh/${GithubSync.NTFY_TOPIC}`, {
+    await fetch(`https://ntfy.sh/${Sync.NTFY_TOPIC}`, {
       method: 'POST',
       headers: {
         'Title':    title,

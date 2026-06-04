@@ -6,47 +6,40 @@
  * ----------------------------
  * Runs on the machine that hosts Ollama (LAN-only). For each open project it
  * asks a local Ollama model for the single best next action + a few concrete
- * tasks, writes the result back into data.json on GitHub, and the PWA shows it
- * on the next load. Nothing leaves your network except the generated text that
- * gets committed to your own repo.
+ * tasks, writes the result back to Supabase, and the PWA shows it on the next
+ * load. Nothing leaves your network except the generated text that gets stored
+ * in your own Supabase project.
  *
- * Talks to GitHub with the same Contents API the web app uses, so it reads and
- * writes data.json on the repo's default branch — the same file the app syncs.
+ * Talks to the same Supabase REST API the web app uses, reading projects and
+ * patching each one's suggestion in place.
  *
  * Requires Node 18+ (global fetch). No npm install needed.
  *
  * Config (all via environment variables):
- *   GITHUB_PAT     (required) fine-grained/classic PAT with Contents read+write on the repo
- *   GITHUB_REPO    default "samcbarth/runmywork"
- *   OLLAMA_HOST    default "http://127.0.0.1:11434"
- *   OLLAMA_MODEL   default "llama3.1"
- *   ADVISOR_FORCE  "1" to (re)generate for every open project, ignoring the
- *                  "unchanged since last suggestion" skip. Default off.
+ *   SUPABASE_URL               (required) e.g. https://xxxx.supabase.co
+ *   SUPABASE_SERVICE_ROLE_KEY  (required) service_role key — stays on this box, never committed
+ *   OLLAMA_HOST                default "http://127.0.0.1:11434"
+ *   OLLAMA_MODEL               default "llama3.1"
+ *   ADVISOR_FORCE              "1" to (re)generate for every open project, ignoring the
+ *                              "unchanged since last suggestion" skip. Default off.
  */
 
-const REPO        = process.env.GITHUB_REPO   || 'samcbarth/runmywork';
-const PAT         = process.env.GITHUB_PAT    || '';
-const OLLAMA_HOST = (process.env.OLLAMA_HOST  || 'http://127.0.0.1:11434').replace(/\/+$/, '');
-const MODEL       = process.env.OLLAMA_MODEL  || 'llama3.1';
-const FORCE       = process.env.ADVISOR_FORCE === '1';
+const SUPABASE_URL = (process.env.SUPABASE_URL || '').replace(/\/+$/, '');
+const SERVICE_KEY  = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+const OLLAMA_HOST  = (process.env.OLLAMA_HOST  || 'http://127.0.0.1:11434').replace(/\/+$/, '');
+const MODEL        = process.env.OLLAMA_MODEL  || 'llama3.1';
+const FORCE        = process.env.ADVISOR_FORCE === '1';
 
-const GH_API = `https://api.github.com/repos/${REPO}/contents/data.json`;
+const REST = `${SUPABASE_URL}/rest/v1`;
 
-if (!PAT) {
-  console.error('GITHUB_PAT is not set — cannot read or write data.json. Aborting.');
+if (!SUPABASE_URL || !SERVICE_KEY) {
+  console.error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set — cannot reach the datastore. Aborting.');
   process.exit(1);
 }
 
 /* ── helpers ─────────────────────────────────────────────────────── */
 
 function log(...args) { console.log(`[advisor]`, ...args); }
-
-function b64decode(str) {
-  return Buffer.from(str.replace(/\s/g, ''), 'base64').toString('utf8');
-}
-function b64encode(str) {
-  return Buffer.from(str, 'utf8').toString('base64');
-}
 
 async function fetchJson(url, opts, ms = 15000) {
   const ctrl = new AbortController();
@@ -59,44 +52,47 @@ async function fetchJson(url, opts, ms = 15000) {
   }
 }
 
-function ghHeaders() {
+function sbHeaders() {
   return {
-    Authorization: `token ${PAT}`,
-    Accept:        'application/vnd.github.v3+json',
-    'User-Agent':  'runmywork-advisor'
+    apikey:         SERVICE_KEY,
+    Authorization:  `Bearer ${SERVICE_KEY}`,
+    'Content-Type': 'application/json',
+    'User-Agent':   'runmywork-advisor'
   };
 }
 
-/* ── GitHub data.json read / write ───────────────────────────────── */
-
-async function pullData() {
-  const res = await fetchJson(GH_API, { headers: ghHeaders() });
-  if (!res.ok) throw new Error(`GitHub GET failed: ${res.status} ${res.statusText}`);
-  const file = await res.json();
-  return { data: JSON.parse(b64decode(file.content)), sha: file.sha };
+// Map a Supabase row (snake_case) to the camelCase project shape the prompt +
+// needsAdvice logic expect. Mirrors Sync.rowToProject in js/store.js.
+function rowToProject(r) {
+  return {
+    id: r.id, title: r.title, description: r.description,
+    status: r.status, priority: r.priority, tags: r.tags || [],
+    createdAt: r.created_at, updatedAt: r.updated_at,
+    statusHistory: r.status_history || [],
+    sessions: r.sessions || [], totalMinutes: r.total_minutes || 0,
+    blockedReason: r.blocked_reason || '', snoozedUntil: r.snoozed_until ?? null,
+    links: r.links || [], tasks: r.tasks || [],
+    aiSuggestion: r.ai_suggestion ?? null, aiRequested: !!r.ai_requested
+  };
 }
 
-async function pushData(data) {
-  // Re-fetch the SHA right before writing to avoid clobbering a concurrent
-  // sync from the app (same pattern the web app uses).
-  let sha = null;
-  const getRes = await fetchJson(GH_API, { headers: ghHeaders() });
-  if (getRes.ok) sha = (await getRes.json()).sha;
+/* ── Supabase data read / write ──────────────────────────────────── */
 
-  const body = {
-    message: `advisor ${new Date().toISOString().slice(0, 16).replace('T', ' ')}`,
-    content: b64encode(JSON.stringify(data, null, 2)),
-    ...(sha ? { sha } : {})
-  };
-  const res = await fetchJson(GH_API, {
-    method: 'PUT',
-    headers: { ...ghHeaders(), 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
+async function pullProjects() {
+  const res = await fetchJson(`${REST}/projects?select=*`, { headers: sbHeaders() });
+  if (!res.ok) throw new Error(`Supabase GET failed: ${res.status} ${res.statusText}`);
+  return (await res.json()).map(rowToProject);
+}
+
+// Write only the advisor's fields for one project — no read-modify-write of the
+// whole dataset, so this can never clobber a concurrent edit from the app.
+async function writeSuggestion(project) {
+  const res = await fetchJson(`${REST}/projects?id=eq.${encodeURIComponent(project.id)}`, {
+    method: 'PATCH',
+    headers: { ...sbHeaders(), Prefer: 'return=minimal' },
+    body: JSON.stringify({ ai_suggestion: project.aiSuggestion, ai_requested: false })
   });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(`GitHub PUT failed: ${res.status} ${err.message || res.statusText}`);
-  }
+  if (!res.ok) throw new Error(`Supabase PATCH failed: ${res.status} ${res.statusText}`);
 }
 
 /* ── Ollama ──────────────────────────────────────────────────────── */
@@ -188,8 +184,7 @@ async function main() {
     process.exit(1);
   }
 
-  const { data } = await pullData();
-  const projects = data.projects || [];
+  const projects = await pullProjects();
   const targets = projects.filter(needsAdvice);
 
   if (targets.length === 0) {
@@ -212,6 +207,7 @@ async function main() {
         basedOnUpdatedAt: project.updatedAt
       };
       project.aiRequested = false;
+      await writeSuggestion(project);
       changed++;
       log(`   ${nextAction || '(tasks only)'}`);
     } catch (e) {
@@ -224,9 +220,7 @@ async function main() {
     return;
   }
 
-  data.advisedAt = Date.now();
-  await pushData(data);
-  log(`Wrote ${changed} suggestion(s) back to data.json.`);
+  log(`Wrote ${changed} suggestion(s) back to Supabase.`);
 }
 
 main().catch(e => { console.error('Advisor failed:', e.message); process.exit(1); });

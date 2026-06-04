@@ -1,4 +1,4 @@
-const CACHE = 'runmywork-v17';
+const CACHE = 'runmywork-v18';
 const PRECACHE = [
   './',
   './index.html',
@@ -36,7 +36,9 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
   const url = new URL(e.request.url);
-  // Only manage same-origin requests; let GitHub/ntfy/etc. pass straight through.
+  // Never cache the datastore — always hit the network so devices stay live.
+  if (url.hostname.endsWith('.supabase.co')) { e.respondWith(fetch(e.request)); return; }
+  // Only manage same-origin requests; let Supabase/ntfy/etc. pass straight through.
   if (url.origin !== self.location.origin) return;
 
   e.respondWith(

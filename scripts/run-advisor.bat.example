@@ -1,13 +1,13 @@
 @echo off
 REM ── RunMyWork advisor — Windows launcher ──────────────────────────
 REM Copy this file to "run-advisor.bat" (which is gitignored) and fill in
-REM your PAT. Then point Task Scheduler at run-advisor.bat.
+REM your Supabase keys. Then point Task Scheduler at run-advisor.bat.
 
-REM Your GitHub Personal Access Token (Contents: read & write on the repo).
-set GITHUB_PAT=ghp_REPLACE_ME
+REM Your Supabase project URL and service_role key (stays on this box only).
+set SUPABASE_URL=https://YOUR-PROJECT-REF.supabase.co
+set SUPABASE_SERVICE_ROLE_KEY=REPLACE_ME
 
 REM Optional overrides (defaults shown):
-REM set GITHUB_REPO=samcbarth/runmywork
 REM set OLLAMA_HOST=http://127.0.0.1:11434
 set OLLAMA_MODEL=llama3.1
 REM set ADVISOR_FORCE=1
