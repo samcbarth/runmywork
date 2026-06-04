@@ -2,9 +2,7 @@ const Store = (() => {
   const KEYS = {
     projects:   'tracker_projects',
     settings:   'tracker_settings',
-    session:    'tracker_active_session',
-    githubCfg:  'tracker_github_config',
-    githubSha:  'tracker_github_sha'
+    session:    'tracker_active_session'
   };
 
   const DEFAULT_SETTINGS = {
@@ -47,6 +45,7 @@ const Store = (() => {
   function deleteProject(id) {
     _saveProjects(getProjects().filter(p => p.id !== id));
     _deleteNotifyCache(id);
+    Sync.remove(id);                       // upserts never delete — drop the row explicitly
     setTimeout(() => App.syncPush(), 0);
   }
 
@@ -218,35 +217,30 @@ const Store = (() => {
   };
 })();
 
-/* ── GitHub sync ─────────────────────────────────────────────────── */
+/* ── Supabase sync ───────────────────────────────────────────────── */
 
-const GithubSync = (() => {
-  let _pushing = false;
-  const REPO      = 'samcbarth/runmywork';
+const Sync = (() => {
+  // Public-by-design connection info, committed to the repo so every device is
+  // synced with zero setup. The anon key is SAFE to embed — Row Level Security
+  // governs access. NEVER put the service_role key (or any secret) here.
+  // ↓↓↓ Fill these in from your Supabase project (Settings → API). ↓↓↓
+  const SUPABASE_URL      = 'https://tmqffprfhavzbaycvxej.supabase.co';
+  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRtcWZmcHJmaGF2emJheWN2eGVqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1NDE1MTQsImV4cCI6MjA5NjExNzUxNH0.rtcPzaPwo2qMYJdm_sdpOvjEuEuK0O0I6r-pPrqCma4';
+
   const NTFY_TOPIC = 'rmw-sam-9k2x7p';   // hardcoded — subscribe to this in the ntfy app
 
-  function getConfig() {
-    try {
-      const stored = JSON.parse(localStorage.getItem(Store.KEYS.githubCfg) || '{}');
-      return { pat: stored.pat || '', repo: stored.repo || REPO };
-    } catch { return { pat: '', repo: REPO }; }
-  }
+  const REST    = `${SUPABASE_URL.replace(/\/+$/, '')}/rest/v1`;
+  const HEADERS = {
+    apikey:         SUPABASE_ANON_KEY,
+    Authorization:  `Bearer ${SUPABASE_ANON_KEY}`,
+    'Content-Type': 'application/json'
+  };
 
-  function saveConfig(pat, repo) {
-    localStorage.setItem(Store.KEYS.githubCfg, JSON.stringify({ pat, repo: repo || REPO }));
-  }
-
+  // Until the placeholders are replaced, sync is a no-op and the app runs
+  // purely on localStorage (still fully usable offline).
   function isConfigured() {
-    return !!getConfig().pat;
+    return !/YOUR-(PROJECT-REF|ANON-KEY)/.test(SUPABASE_URL + SUPABASE_ANON_KEY);
   }
-
-  function _sha() { return localStorage.getItem(Store.KEYS.githubSha) || null; }
-  function _setSha(sha) { localStorage.setItem(Store.KEYS.githubSha, sha); }
-
-  function _b64encode(str) { return btoa(unescape(encodeURIComponent(str))); }
-  function _b64decode(str) { return decodeURIComponent(escape(atob(str.replace(/\s/g, '')))); }
-  function _hide(s) { return s.split('').reverse().join(''); }
-  function _reveal(s) { return s.split('').reverse().join(''); }
 
   function _fetchWithTimeout(url, opts = {}, ms = 12000) {
     const ctrl = new AbortController();
@@ -254,125 +248,116 @@ const GithubSync = (() => {
     return fetch(url, { ...opts, signal: ctrl.signal }).finally(() => clearTimeout(id));
   }
 
-  function _applyData(data, sha) {
-    if (sha) _setSha(sha);
-    if (Array.isArray(data.projects)) {
-      localStorage.setItem(Store.KEYS.projects, JSON.stringify(data.projects));
+  /* ── row ↔ project mapping (single source of truth, camel ↔ snake) ── */
+  function rowToProject(r) {
+    return {
+      id: r.id, title: r.title, description: r.description,
+      status: r.status, priority: r.priority, tags: r.tags || [],
+      createdAt: r.created_at, updatedAt: r.updated_at,
+      statusHistory: r.status_history || [],
+      sessions: r.sessions || [], totalMinutes: r.total_minutes || 0,
+      blockedReason: r.blocked_reason || '', snoozedUntil: r.snoozed_until ?? null,
+      links: r.links || [], tasks: r.tasks || [],
+      aiSuggestion: r.ai_suggestion ?? null, aiRequested: !!r.ai_requested
+    };
+  }
+  function projectToRow(p) {
+    return {
+      id: p.id, title: p.title, description: p.description,
+      status: p.status, priority: p.priority, tags: p.tags || [],
+      created_at: p.createdAt, updated_at: p.updatedAt,
+      status_history: p.statusHistory || [],
+      sessions: p.sessions || [], total_minutes: p.totalMinutes || 0,
+      blocked_reason: p.blockedReason || '', snoozed_until: p.snoozedUntil ?? null,
+      links: p.links || [], tasks: p.tasks || [],
+      ai_suggestion: p.aiSuggestion ?? null, ai_requested: !!p.aiRequested
+    };
+  }
+
+  function _applyData(projectRows, settingsRow) {
+    if (Array.isArray(projectRows)) {
+      localStorage.setItem(Store.KEYS.projects, JSON.stringify(projectRows.map(rowToProject)));
     }
-    if (data.settings) {
-      if (data.settings._k) saveConfig(_reveal(data.settings._k), REPO);
+    if (settingsRow) {
       const local = Store.getSettings();
       Store.saveSettings({
         ...local,
-        ntfyTopic:  data.settings.ntfyTopic  || local.ntfyTopic  || '',
-        thresholds: data.settings.thresholds || local.thresholds
+        ntfyTopic:  settingsRow.ntfy_topic || local.ntfyTopic || '',
+        thresholds: settingsRow.thresholds || local.thresholds
       });
     }
   }
 
   async function pull() {
-    const { pat, repo } = getConfig();
-
-    // Authenticated first when PAT available — avoids CDN-cached stale SHA
-    if (pat) {
-      try {
-        const res = await _fetchWithTimeout(
-          `https://api.github.com/repos/${repo}/contents/data.json`,
-          { headers: { Authorization: `token ${pat}`, Accept: 'application/vnd.github.v3+json' } }
-        );
-        if (res.status === 404) return { ok: false, reason: 'not-found' };
-        if (!res.ok) return { ok: false, reason: `http-${res.status}` };
-        const file = await res.json();
-        _applyData(JSON.parse(_b64decode(file.content)), file.sha);
-        return { ok: true };
-      } catch (e) {
-        return { ok: false, reason: e.name === 'AbortError' ? 'timeout' : e.message };
-      }
-    }
-
-    // No PAT — unauthenticated read (public repo bootstrap)
+    if (!isConfigured()) return { ok: false, reason: 'not-configured' };
     try {
-      const res = await _fetchWithTimeout(
-        `https://api.github.com/repos/${repo}/contents/data.json`,
-        { headers: { Accept: 'application/vnd.github.v3+json' } }
-      );
-      if (res.ok) {
-        const file = await res.json();
-        _applyData(JSON.parse(_b64decode(file.content)), file.sha);
-        return { ok: true };
-      }
-      return { ok: false, reason: `http-${res.status}` };
+      const [pRes, sRes] = await Promise.all([
+        _fetchWithTimeout(`${REST}/projects?select=*`, { headers: HEADERS }),
+        _fetchWithTimeout(`${REST}/settings?id=eq.1&select=*`, { headers: HEADERS })
+      ]);
+      if (!pRes.ok) return { ok: false, reason: `http-${pRes.status}` };
+      const projectRows = await pRes.json();
+      const settingsRow = sRes.ok ? (await sRes.json())[0] : null;
+      _applyData(projectRows, settingsRow);
+      return { ok: true };
     } catch (e) {
       return { ok: false, reason: e.name === 'AbortError' ? 'timeout' : e.message };
     }
   }
 
+  let _pushing = false;
   async function push() {
+    if (!isConfigured()) return { ok: false, reason: 'not-configured' };
     if (_pushing) return { ok: false, reason: 'busy' };
-    const { pat, repo } = getConfig();
-    if (!pat) return { ok: false, reason: 'not-configured' };
 
     _pushing = true;
     try {
       const settings = Store.getSettings();
-      const data = {
-        projects: Store.getProjects(),
-        settings: {
-          ntfyTopic:  NTFY_TOPIC,
-          thresholds: settings.thresholds || {},
-          _k: _hide(pat)
-        },
-        syncedAt: Date.now()
-      };
-      const content = _b64encode(JSON.stringify(data, null, 2));
+      const rows = Store.getProjects().map(projectToRow);
 
-      // Always fetch current SHA fresh from GitHub right before writing
-      let sha = null;
-      try {
-        const getRes = await _fetchWithTimeout(
-          `https://api.github.com/repos/${repo}/contents/data.json`,
-          { headers: { Authorization: `token ${pat}`, Accept: 'application/vnd.github.v3+json' } }
-        );
-        if (getRes.ok) {
-          const file = await getRes.json();
-          sha = file.sha;
-          _setSha(sha);
-          _applyData(JSON.parse(_b64decode(file.content)), sha);
+      // Coarse upsert of the full current state — matches the app's existing
+      // whole-document push semantics; dataset is tiny so this is one round-trip.
+      if (rows.length) {
+        const pRes = await _fetchWithTimeout(`${REST}/projects?on_conflict=id`, {
+          method: 'POST',
+          headers: { ...HEADERS, Prefer: 'resolution=merge-duplicates,return=minimal' },
+          body: JSON.stringify(rows)
+        });
+        if (!pRes.ok) {
+          const err = await pRes.text().catch(() => '');
+          _pushing = false;
+          return { ok: false, reason: `${pRes.status}: ${err.slice(0, 120)}` };
         }
-      } catch { /* file may not exist yet — push without SHA to create it */ }
-
-      const res = await _fetchWithTimeout(
-        `https://api.github.com/repos/${repo}/contents/data.json`,
-        {
-          method: 'PUT',
-          headers: {
-            Authorization:  `token ${pat}`,
-            Accept:         'application/vnd.github.v3+json',
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            message: `sync ${new Date().toISOString().slice(0, 16).replace('T', ' ')}`,
-            content,
-            ...(sha ? { sha } : {})
-          })
-        }
-      );
-
-      if (!res.ok) {
-        const errBody = await res.json().catch(() => ({}));
-        _pushing = false;
-        return { ok: false, reason: `${res.status}: ${errBody.message || res.statusText}` };
       }
 
-      const result = await res.json();
-      _setSha(result.content.sha);
+      const sRes = await _fetchWithTimeout(`${REST}/settings?on_conflict=id`, {
+        method: 'POST',
+        headers: { ...HEADERS, Prefer: 'resolution=merge-duplicates,return=minimal' },
+        body: JSON.stringify([{ id: 1, ntfy_topic: NTFY_TOPIC, thresholds: settings.thresholds || {} }])
+      });
       _pushing = false;
+      if (!sRes.ok) return { ok: false, reason: `settings http-${sRes.status}` };
       return { ok: true };
     } catch (e) {
       _pushing = false;
+      return { ok: false, reason: e.name === 'AbortError' ? 'timeout' : e.message };
+    }
+  }
+
+  // Upserts never delete, so a removed project must be dropped explicitly or the
+  // next pull() resurrects it. Called from Store.deleteProject.
+  async function remove(id) {
+    if (!isConfigured()) return { ok: false, reason: 'not-configured' };
+    try {
+      const res = await _fetchWithTimeout(`${REST}/projects?id=eq.${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        headers: { ...HEADERS, Prefer: 'return=minimal' }
+      });
+      return { ok: res.ok, reason: res.ok ? undefined : `http-${res.status}` };
+    } catch (e) {
       return { ok: false, reason: e.message };
     }
   }
 
-  return { getConfig, saveConfig, isConfigured, pull, push, NTFY_TOPIC, REPO };
+  return { pull, push, remove, isConfigured, rowToProject, projectToRow, NTFY_TOPIC };
 })();

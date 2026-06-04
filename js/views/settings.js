@@ -1,9 +1,7 @@
 Views.Settings = (() => {
   function render() {
-    const ghConfig   = GithubSync.getConfig();
     const settings   = Store.getSettings();
     const permStatus = typeof Notification !== 'undefined' ? Notification.permission : 'unsupported';
-    const hasPat     = !!ghConfig.pat;
 
     document.getElementById('view-root').innerHTML = `
       <button class="detail-back" onclick="App.navigate('')">
@@ -14,24 +12,10 @@ Views.Settings = (() => {
 
       <!-- ── Sync ── -->
       <div class="settings-section">
-        <div class="settings-section-title">GitHub Sync ${hasPat ? '<span style="color:var(--c-active);font-weight:400;text-transform:none;font-size:0.8rem;">● Connected</span>' : '<span style="color:var(--c-blocked);font-weight:400;text-transform:none;font-size:0.8rem;">● Not connected</span>'}</div>
-        <p style="font-size:0.82rem;color:var(--text-2);margin-bottom:14px;line-height:1.6;">
-          Syncs your projects to GitHub so every device stays in sync automatically.
-          Requires a GitHub Personal Access Token with <strong>Contents: Read &amp; Write</strong> on <code>samcbarth/runmywork</code>.
-          <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener" style="color:var(--accent);">Create one →</a>
+        <div class="settings-section-title">Sync <span style="color:var(--c-active);font-weight:400;text-transform:none;font-size:0.8rem;">● Automatic</span></div>
+        <p style="font-size:0.82rem;color:var(--text-2);line-height:1.6;">
+          Your projects sync across every device automatically through Supabase — no setup, nothing to configure.
         </p>
-        <div class="form-group">
-          <label class="form-label" for="gh-pat">Personal Access Token</label>
-          <input class="form-input" id="gh-pat" type="password"
-            placeholder="github_pat_…"
-            value="${Models.escapeHtml(ghConfig.pat || '')}"
-            autocomplete="off">
-          <p class="form-hint">Stored in this browser and synced to your repo — only enter this once, on any one device.</p>
-        </div>
-        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-          <button class="btn btn-primary" id="sync-save-btn">Save &amp; sync</button>
-          <span id="sync-result" style="font-size:0.82rem;color:var(--text-2);"></span>
-        </div>
       </div>
 
       <!-- ── Notifications ── -->
@@ -99,8 +83,6 @@ Views.Settings = (() => {
     const countEl  = document.getElementById('project-count');
     if (countEl) countEl.textContent = `${projects.length} project${projects.length !== 1 ? 's' : ''}`;
 
-    document.getElementById('sync-save-btn').addEventListener('click', _saveGithubConfig);
-
     const toggle = document.getElementById('notif-toggle');
     toggle.addEventListener('change', async () => {
       if (toggle.checked) {
@@ -121,46 +103,6 @@ Views.Settings = (() => {
       updateBtn.disabled = true;
       App.checkForUpdate();
     });
-  }
-
-  async function _saveGithubConfig() {
-    const pat    = document.getElementById('gh-pat').value.trim();
-    const result = document.getElementById('sync-result');
-    const btn    = document.getElementById('sync-save-btn');
-
-    GithubSync.saveConfig(pat, GithubSync.REPO);
-
-    if (!pat) { result.textContent = 'Enter a PAT to enable sync.'; return; }
-
-    result.style.color = 'var(--text-2)';
-    result.textContent = '⟳ Pulling…';
-    btn.disabled = true;
-
-    try {
-      const pullRes = await GithubSync.pull();
-      if (!pullRes.ok && pullRes.reason !== 'not-configured' && pullRes.reason !== 'not-found') {
-        btn.disabled = false;
-        result.style.color = 'var(--c-blocked)';
-        result.textContent = `✗ Pull failed: ${pullRes.reason}`;
-        return;
-      }
-
-      result.textContent = '⟳ Pushing…';
-      const pushRes = await GithubSync.push();
-
-      btn.disabled = false;
-      if (pushRes.ok) {
-        result.style.color = 'var(--c-active)';
-        result.textContent = '✓ Synced — all devices will pick this up automatically';
-      } else {
-        result.style.color = 'var(--c-blocked)';
-        result.textContent = `✗ Push failed: ${pushRes.reason}`;
-      }
-    } catch (e) {
-      btn.disabled = false;
-      result.style.color = 'var(--c-blocked)';
-      result.textContent = `✗ Error: ${e.message}`;
-    }
   }
 
   function _saveNotifSettings() {

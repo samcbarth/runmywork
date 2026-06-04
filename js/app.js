@@ -137,9 +137,9 @@ const App = (() => {
   }
 
   async function syncPush() {
-    if (!GithubSync.isConfigured()) return;
+    if (!Sync.isConfigured()) return;
     showSyncStatus('syncing');
-    const result = await GithubSync.push();
+    const result = await Sync.push();
     showSyncStatus(result.ok ? 'ok' : 'error');
   }
 
@@ -181,10 +181,9 @@ const App = (() => {
     _registerSW();
     setTimeout(() => Notifications.checkOnOpen(), 1500);
 
-    // Always pull — unauthenticated read works on public repos,
-    // bootstraps PAT + data on any new device automatically
+    // Always pull from Supabase — zero-setup, every device stays in sync.
     showSyncStatus('pulling');
-    const result = await GithubSync.pull();
+    const result = await Sync.pull();
     showSyncStatus(result.ok ? 'ok' : 'error');
 
     _handleRoute();
