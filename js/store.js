@@ -504,6 +504,21 @@ const Sync = (() => {
     }
   }
 
+  /* ── Agent error log ── */
+
+  async function pullErrorLog(projectId, limit = 50) {
+    if (!isConfigured()) return { ok: false, reason: 'not-configured', entries: [] };
+    try {
+      const res = await _fetchWithTimeout(
+        `${REST}/agent_error_log?project_id=eq.${encodeURIComponent(projectId)}&order=created_at.desc&limit=${limit}`,
+        { headers: HEADERS });
+      if (!res.ok) return { ok: false, reason: `http-${res.status}`, entries: [] };
+      return { ok: true, entries: await res.json() };
+    } catch (e) {
+      return { ok: false, reason: e.name === 'AbortError' ? 'timeout' : e.message, entries: [] };
+    }
+  }
+
   /* ── Agent runs (progress tracker) ── */
 
   // The most recent agent run for a project (powers the Domino's-style tracker).
@@ -524,7 +539,7 @@ const Sync = (() => {
   return {
     pull, push, pushProject, remove,
     pullApprovals, decideApproval, addWorklog, pullWorklog,
-    pullContext, addContext, pullLatestRun,
+    pullContext, addContext, pullLatestRun, pullErrorLog,
     isConfigured, rowToProject, projectToRow, NTFY_TOPIC
   };
 })();

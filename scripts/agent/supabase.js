@@ -156,6 +156,34 @@ function makeSupabase(config) {
     return res.ok;
   }
 
+  /* ── agent_error_log (step-level failure details) ── */
+
+  async function logError({ projectId, runId, stepNumber, errorMessage, errorStack, toolName }) {
+    try {
+      const row = {
+        project_id: projectId,
+        run_id: runId || null,
+        step_number: stepNumber || 0,
+        error_message: String(errorMessage || '').slice(0, 2000),
+        error_stack: errorStack ? String(errorStack).slice(0, 5000) : null,
+        tool_name: toolName || null,
+        created_at: Date.now()
+      };
+      await rest(`/agent_error_log`, {
+        method: 'POST',
+        headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify([row])
+      });
+    } catch { /* never block the loop for logging */ }
+  }
+
+  async function pullErrorLog(projectId, limit = 50) {
+    const res = await rest(
+      `/agent_error_log?project_id=eq.${encodeURIComponent(projectId)}&order=created_at.desc&limit=${limit}`);
+    if (!res.ok) return [];
+    return res.json();
+  }
+
   async function ping() {
     const res = await rest(`/projects?select=id&limit=1`, {}, 6000);
     return res.ok;
@@ -166,6 +194,7 @@ function makeSupabase(config) {
     addWorklog, pullWorklog,
     pendingApprovals, createApproval,
     pullContext, createRun, updateRun,
+    logError, pullErrorLog,
     rowToProject, ping
   };
 }

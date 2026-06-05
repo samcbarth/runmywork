@@ -182,6 +182,16 @@ async function runLoop(opts) {
     } catch (e) {
       log(`  ${'·'.repeat(depth + 1)} model error: ${e.message}`);
       modelErrored = true;
+      if (depth === 0) {
+        await sb.logError({
+          projectId: project && project.id,
+          runId: ctx.run && ctx.run.id,
+          stepNumber: steps,
+          errorMessage: `Model error: ${e.message}`,
+          errorStack: e.stack,
+          toolName: null
+        });
+      }
       break;
     }
 
@@ -204,7 +214,22 @@ async function runLoop(opts) {
       if (typeof args === 'string') { try { args = JSON.parse(args); } catch { args = {}; } }
 
       log(`  ${'·'.repeat(depth + 1)} ${name}(${preview(args)})`);
-      const result = await dispatch(ctx.tools, name, args, ctx);
+      let result;
+      try {
+        result = await dispatch(ctx.tools, name, args, ctx);
+      } catch (e) {
+        result = JSON.stringify({ error: e.message });
+        if (depth === 0) {
+          await sb.logError({
+            projectId: project && project.id,
+            runId: ctx.run && ctx.run.id,
+            stepNumber: steps,
+            errorMessage: `Tool "${name}" threw: ${e.message}`,
+            errorStack: e.stack,
+            toolName: name
+          });
+        }
+      }
       messages.push({ role: 'tool', content: result, tool_name: name });
 
       // feed the tracker (the `stage` tool updates stage/percent itself)
@@ -217,6 +242,18 @@ async function runLoop(opts) {
       if (name === 'build_tool') schemas = ctx.reloadTools();
       if (ctx.done) break;
     }
+  }
+
+  // log budget exhaustion (agent ran out of steps without calling done)
+  if (!ctx.done && !modelErrored && depth === 0 && project) {
+    await sb.logError({
+      projectId: project.id,
+      runId: ctx.run && ctx.run.id,
+      stepNumber: steps,
+      errorMessage: `Budget exhausted after ${steps} steps without calling done`,
+      errorStack: null,
+      toolName: null
+    });
   }
 
   // finalize the tracker run

@@ -96,6 +96,7 @@ Views.ProjectDetail = (() => {
       ${_renderLinksSection(project)}
       ${_renderHistorySection(project)}
       ${_renderWorklogSection(project)}
+      ${_renderErrorLogSection(project)}
 
       <div style="margin-top:20px;text-align:center;">
         <button class="btn btn-ghost btn-sm" onclick="Views.ProjectForm.confirmDelete('${id}')" style="color:var(--c-blocked)">Delete project</button>
@@ -112,6 +113,7 @@ Views.ProjectDetail = (() => {
     loadRun(id);
     loadContext(id);
     loadWorklog(id);
+    loadErrorLog(id);
   }
 
   function _statusMenuItems(currentStatus) {
@@ -236,6 +238,18 @@ Views.ProjectDetail = (() => {
         <div class="worklog-list" id="worklog-list-${project.id}">
           <p style="color:var(--text-2);font-size:0.85rem;">The agent's journal for this project — proposals, actions, notes.</p>
         </div>
+      </div>`;
+  }
+
+  function _renderErrorLogSection(project) {
+    return `
+      <div class="section-card" id="error-log-section-${project.id}" style="display:none;">
+        <div class="section-header">
+          <span class="section-title" style="color:var(--c-blocked);">⚠ Agent Error Log</span>
+          <button class="btn btn-sm" id="error-log-reload-${project.id}"
+            onclick="Views.ProjectDetail.loadErrorLog('${project.id}')">↻ Reload</button>
+        </div>
+        <div id="error-log-list-${project.id}"></div>
       </div>`;
   }
 
@@ -659,6 +673,33 @@ Views.ProjectDetail = (() => {
       </div>`).join('');
   }
 
+  async function loadErrorLog(projectId) {
+    const section = document.getElementById(`error-log-section-${projectId}`);
+    const list = document.getElementById(`error-log-list-${projectId}`);
+    if (!list) return;
+
+    const { ok, entries } = await Sync.pullErrorLog(projectId);
+    if (!ok || !entries.length) { if (section) section.style.display = 'none'; return; }
+
+    section.style.display = '';
+    list.innerHTML = entries.map(e => {
+      const ts = Models.formatDateTime(e.created_at);
+      const tool = e.tool_name ? `<span class="worklog-chip">${Models.escapeHtml(e.tool_name)}</span>` : '';
+      const step = `<span class="worklog-chip">step ${e.step_number}</span>`;
+      const stack = e.error_stack
+        ? `<details style="margin-top:6px;"><summary style="font-size:0.75rem;color:var(--text-2);cursor:pointer;">stack trace</summary><div class="worklog-detail" style="font-size:0.72rem;font-family:monospace;">${Models.escapeHtml(e.error_stack)}</div></details>`
+        : '';
+      return `
+        <div class="history-item">
+          <div class="history-content">
+            <div class="history-status" style="color:var(--c-blocked);">✗ ${Models.escapeHtml(e.error_message)}</div>
+            <div class="history-date">${ts} ${step}${tool}</div>
+            ${stack}
+          </div>
+        </div>`;
+    }).join('');
+  }
+
   async function saveContext(projectId) {
     const ta = document.getElementById(`context-text-${projectId}`);
     const kindEl = document.getElementById(`context-kind-${projectId}`);
@@ -681,6 +722,6 @@ Views.ProjectDetail = (() => {
   return {
     render, toggleStatusMenu, changeStatus, deleteSession, addLink, deleteLink,
     addTask, toggleTask, deleteTask, requestAdvice, decideProposal, loadWorklog,
-    loadRun, loadContext, saveContext
+    loadRun, loadContext, saveContext, loadErrorLog
   };
 })();
