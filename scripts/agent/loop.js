@@ -108,7 +108,7 @@ function buildUserPrompt(goal, project, contextText) {
     const open = (project.tasks || []).filter(t => !t.done).map(t => t.text);
     const done = (project.tasks || []).filter(t => t.done).map(t => t.text);
     if (open.length) lines.push(`Open tasks:\n- ${open.join('\n- ')}`);
-    if (done.length) lines.push(`Done: ${done.join('; ')}`);
+    if (done.length) lines.push(`(${done.length} task(s) already completed — do not work on those.)`);
     if (project.links?.length) lines.push(`Links: ${project.links.map(l => l.url).join(', ')}`);
   }
   if (contextText) { lines.push('', 'CONTEXT & MEMORY', contextText); }

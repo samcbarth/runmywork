@@ -84,10 +84,13 @@ async function buildMemory(sb, projectId) {
 
 async function runForProject(services, project, goalOverride, budgetOverride) {
   const { sb } = services;
-  const lastAdvice = project.aiSuggestion && project.aiSuggestion.nextAction;
+  // Goal is derived from the project's CURRENT open state — NOT the agent's own
+  // last summary. Using the prior summary as the next goal made the agent fixate
+  // on whatever it mentioned last (e.g. one task) run after run.
+  const openTasks = (project.tasks || []).filter(t => !t.done).map(t => t.text);
+  const focus = openTasks.length ? ` Prioritise the open tasks: ${openTasks.slice(0, 5).join('; ')}.` : '';
   const goal = goalOverride
-    || (lastAdvice && lastAdvice !== '(no summary)' ? lastAdvice : null)
-    || `Make concrete, useful progress on "${project.title}". Research what's needed, draft or build any deliverable, save it, and propose the next tasks and any status change. Don't just plan — produce something.`;
+    || `Make concrete, useful progress on "${project.title}".${focus} Research what's needed, draft or build a deliverable, save it, and propose the next tasks or a status change. Produce something — don't just plan. Do not re-investigate things already marked done.`;
 
   const contextText = await buildMemory(sb, project.id);
 
