@@ -1,6 +1,6 @@
 const App = (() => {
   // Bumped on each deploy so you can confirm which build is live (shown in Settings).
-  const BUILD = '2026-06-05 · context+tracker';
+  const BUILD = '2026-06-05 · context-autoload';
 
   let _timerInterval = null;
   let _swRegistration = null;

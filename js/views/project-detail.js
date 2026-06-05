@@ -105,9 +105,11 @@ Views.ProjectDetail = (() => {
     // Close status menu on outside click
     document.addEventListener('click', _closeMenuOnOutside);
 
-    // Load the live agent-progress tracker (and start polling if a run is active).
+    // Live agent-progress tracker (auto-poll while a run is active) + show the
+    // project's context inline without needing the Load button.
     _stopRunPoll();
     loadRun(id);
+    loadContext(id);
   }
 
   function _statusMenuItems(currentStatus) {
@@ -611,10 +613,13 @@ Views.ProjectDetail = (() => {
     if (!list) return;
     if (btn) { btn.disabled = true; btn.textContent = 'Loading…'; }
 
-    const { ok, entries } = await Sync.pullContext(projectId);
+    let res;
+    try { res = await Sync.pullContext(projectId); }
+    catch (e) { res = { ok: false, reason: e.message, entries: [] }; }
     if (btn) { btn.disabled = false; btn.textContent = '↻ Reload'; }
 
-    if (!ok) { list.innerHTML = '<p style="color:var(--c-blocked);font-size:0.85rem;">Could not load context.</p>'; return; }
+    if (!res.ok) { list.innerHTML = `<p style="color:var(--c-blocked);font-size:0.85rem;">Could not load context (${Models.escapeHtml(res.reason || 'error')}).</p>`; return; }
+    const entries = res.entries || [];
     if (!entries.length) { list.innerHTML = '<p style="color:var(--text-2);font-size:0.85rem;">No context yet. Add the first note above.</p>'; return; }
 
     list.innerHTML = entries.map(e => `
@@ -636,7 +641,9 @@ Views.ProjectDetail = (() => {
     const kind = kindEl ? kindEl.value : 'note';
 
     if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
-    const res = await Sync.addContext({ project_id: projectId, kind, content, created_by: 'user' });
+    let res;
+    try { res = await Sync.addContext({ project_id: projectId, kind, content, created_by: 'user' }); }
+    catch (e) { res = { ok: false, reason: e.message }; }
     if (btn) { btn.disabled = false; btn.textContent = 'Save update'; }
 
     if (!res.ok) { alert('Could not save context: ' + (res.reason || 'unknown error')); return; }
