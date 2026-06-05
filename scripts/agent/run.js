@@ -111,15 +111,16 @@ async function runForProject(services, project, goalOverride, budgetOverride) {
     } catch (e) { log(`   (could not update headline: ${e.message})`); }
   }
 
+  const filesChanged = result.changedFiles || [];
   try {
     await sb.addWorklog({
       project_id: project.id, kind: 'action', created_by: 'agent',
-      summary: `Agent run: ${result.steps} steps, ${result.proposals.length} proposal(s), ${result.artifacts.length} artifact(s)`,
-      detail: { summary: result.summary, proposals: result.proposals, artifacts: result.artifacts }
+      summary: `Agent run: ${result.steps} steps, ${result.proposals.length} proposal(s), ${result.artifacts.length} artifact(s)${filesChanged.length ? `, ${filesChanged.length} file(s) changed` : ''}`,
+      detail: { summary: result.summary, proposals: result.proposals, artifacts: result.artifacts, changedFiles: filesChanged }
     });
   } catch { /* best effort */ }
 
-  log(`   ✓ ${result.steps} steps · proposed: ${result.proposals.join(', ') || 'none'} · artifacts: ${result.artifacts.length}`);
+  log(`   ✓ ${result.steps} steps · proposed: ${result.proposals.join(', ') || 'none'} · artifacts: ${result.artifacts.length}${filesChanged.length ? ` · changed: ${filesChanged.map(f => f.path).join(', ')}` : ''}`);
   log(`   ${result.summary.slice(0, 240)}`);
   return result;
 }

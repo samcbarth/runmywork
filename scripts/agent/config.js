@@ -27,6 +27,16 @@ function loadConfig() {
     shellAllow: csv,
     allowBuildTool: bool(process.env.AGENT_ALLOW_BUILD_TOOL),
 
+    // Execution mode — lets the agent read + write real project files and commit.
+    // projectRoot: filesystem path the agent is allowed to read/write.
+    // allowFileWrite: unlocks write_file tool (read is always on when root is set).
+    // allowGitWrite:  unlocks git_commit (requires allowFileWrite).
+    // allowGitPush:   unlocks git_push (requires allowGitWrite + explicit opt-in).
+    projectRoot: (process.env.AGENT_PROJECT_ROOT || '').replace(/[/\\]+$/, ''),
+    allowFileWrite: bool(process.env.AGENT_ALLOW_FILE_WRITE),
+    allowGitWrite:  bool(process.env.AGENT_ALLOW_GIT_WRITE),
+    allowGitPush:   bool(process.env.AGENT_ALLOW_GIT_PUSH),
+
     force: bool(process.env.AGENT_FORCE)
   };
 }

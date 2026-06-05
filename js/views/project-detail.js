@@ -605,6 +605,15 @@ Views.ProjectDetail = (() => {
     if (payload.priority) html += `<div class="worklog-chip">priority → ${Models.escapeHtml(payload.priority)}</div>`;
 
     if (d.file) html += `<div class="worklog-file">📄 ${Models.escapeHtml(d.file)}</div>`;
+
+    // execution-mode: real files the agent changed this run
+    const changed = Array.isArray(d.changedFiles) && d.changedFiles;
+    if (changed && changed.length) {
+      html += `<div style="margin-top:6px;font-size:0.78rem;color:var(--text-2);">Files changed:</div>`;
+      html += changed.map(f =>
+        `<div class="worklog-file">✏ ${Models.escapeHtml(f.path)}${f.reason ? ` — ${Models.escapeHtml(f.reason)}` : ''}</div>`
+      ).join('');
+    }
     return html;
   }
 
