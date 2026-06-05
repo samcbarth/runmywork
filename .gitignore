@@ -1,5 +1,11 @@
 # Local advisor launcher — contains your PAT, never commit it
 scripts/run-advisor.bat
 
+# Local agent runtime — launcher holds the service_role key; work/ is agent scratch
+scripts/run-agent.bat
+scripts/agent/work/
+!scripts/agent/work/.gitkeep
+scripts/agent/.env
+
 node_modules/
 .DS_Store

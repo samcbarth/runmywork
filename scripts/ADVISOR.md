@@ -102,6 +102,11 @@ create policy "anon all approvals" on public.approvals for all to anon using (tr
 `on delete cascade` cleans a project's worklog + approvals automatically when the
 project is deleted.
 
+> **Agent runtime (Phase 2/3).** The autonomous agent under `scripts/agent/` adds two
+> more tables — `project_context` (per-project knowledge the agent reads as memory)
+> and `agent_runs` (the progress-tracker record the app polls). Create them with
+> `scripts/agent/schema.sql`. See `scripts/agent/AGENT.md`.
+
 **The loop:** advisor run → writes `approvals` rows (`status='pending'`) + a
 `worklog` `proposal` entry → the app's 📥 inbox shows them → you Approve (the app
 applies the change app-side via the normal Store path and logs a `worklog`

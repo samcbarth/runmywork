@@ -473,9 +473,58 @@ const Sync = (() => {
     }
   }
 
+  /* ── Project context / knowledge (append-only, versioned) ── */
+
+  // One project's context entries, newest first.
+  async function pullContext(projectId, limit = 50) {
+    if (!isConfigured()) return { ok: false, reason: 'not-configured', entries: [] };
+    try {
+      const res = await _fetchWithTimeout(
+        `${REST}/project_context?project_id=eq.${encodeURIComponent(projectId)}&order=created_at.desc&limit=${limit}`,
+        { headers: HEADERS });
+      if (!res.ok) return { ok: false, reason: `http-${res.status}`, entries: [] };
+      return { ok: true, entries: await res.json() };
+    } catch (e) {
+      return { ok: false, reason: e.name === 'AbortError' ? 'timeout' : e.message, entries: [] };
+    }
+  }
+
+  // Append a context entry (never overwrites — each save is a new version).
+  async function addContext(entry) {
+    if (!isConfigured()) return { ok: false, reason: 'not-configured' };
+    try {
+      const res = await _fetchWithTimeout(`${REST}/project_context`, {
+        method: 'POST',
+        headers: { ...HEADERS, Prefer: 'return=minimal' },
+        body: JSON.stringify([{ created_at: Date.now(), created_by: 'user', kind: 'note', content: '', ...entry }])
+      });
+      return { ok: res.ok, reason: res.ok ? undefined : `http-${res.status}` };
+    } catch (e) {
+      return { ok: false, reason: e.name === 'AbortError' ? 'timeout' : e.message };
+    }
+  }
+
+  /* ── Agent runs (progress tracker) ── */
+
+  // The most recent agent run for a project (powers the Domino's-style tracker).
+  async function pullLatestRun(projectId) {
+    if (!isConfigured()) return { ok: false, reason: 'not-configured', run: null };
+    try {
+      const res = await _fetchWithTimeout(
+        `${REST}/agent_runs?project_id=eq.${encodeURIComponent(projectId)}&order=started_at.desc&limit=1`,
+        { headers: HEADERS });
+      if (!res.ok) return { ok: false, reason: `http-${res.status}`, run: null };
+      const rows = await res.json();
+      return { ok: true, run: rows[0] || null };
+    } catch (e) {
+      return { ok: false, reason: e.name === 'AbortError' ? 'timeout' : e.message, run: null };
+    }
+  }
+
   return {
     pull, push, pushProject, remove,
     pullApprovals, decideApproval, addWorklog, pullWorklog,
+    pullContext, addContext, pullLatestRun,
     isConfigured, rowToProject, projectToRow, NTFY_TOPIC
   };
 })();

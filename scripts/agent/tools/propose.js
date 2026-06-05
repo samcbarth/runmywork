@@ -1,0 +1,116 @@
+'use strict';
+
+/*
+ * The gated bridge from autonomous work → tracked project state.
+ * --------------------------------------------------------------
+ * This is the ONLY tool that can change a project. It never applies anything; it
+ * files a `pending` approval that the human approves in the app's inbox. The
+ * action_type + payload shapes match exactly what js/views/approvals.js knows how
+ * to apply: add_tasks | set_status | set_priority | add_link.
+ *
+ * Repeated runs dedup against existing pending proposals so the inbox never fills
+ * with duplicates.
+ */
+
+const STATUSES = ['active', 'blocked', 'idle', 'done'];
+const PRIORITIES = ['low', 'medium', 'high'];
+
+function buildPayload(action, args) {
+  switch (action) {
+    case 'add_tasks': {
+      const tasks = (Array.isArray(args.tasks) ? args.tasks : [])
+        .map(t => String(t || '').trim()).filter(Boolean).slice(0, 6);
+      if (!tasks.length) throw new Error('add_tasks needs a non-empty "tasks" array of strings');
+      return { tasks };
+    }
+    case 'set_status': {
+      const status = String(args.status || '').toLowerCase().trim();
+      if (!STATUSES.includes(status)) throw new Error(`set_status "status" must be one of ${STATUSES.join('|')}`);
+      return { status, note: (args.note || 'Agent-proposed').slice(0, 200) };
+    }
+    case 'set_priority': {
+      const priority = String(args.priority || '').toLowerCase().trim();
+      if (!PRIORITIES.includes(priority)) throw new Error(`set_priority "priority" must be one of ${PRIORITIES.join('|')}`);
+      return { priority };
+    }
+    case 'add_link': {
+      const url = String(args.url || '').trim();
+      if (!/^https?:\/\//i.test(url)) throw new Error('add_link needs a valid http(s) "url"');
+      return { url, label: (args.label || url).slice(0, 120) };
+    }
+    default:
+      throw new Error(`unknown action "${action}". Use add_tasks | set_status | set_priority | add_link`);
+  }
+}
+
+// Is an equivalent proposal already pending? (avoid duplicate inbox spam)
+function alreadyPending(pending, action, payload) {
+  return pending.some(a => {
+    if (a.action_type !== action) return false;
+    const p = a.payload || {};
+    if (action === 'set_status') return p.status === payload.status;
+    if (action === 'set_priority') return p.priority === payload.priority;
+    if (action === 'add_link') return p.url === payload.url;
+    if (action === 'add_tasks') return true;   // one pending add_tasks batch is enough
+    return false;
+  });
+}
+
+module.exports = {
+  name: 'propose',
+  description: 'Propose a change to the project that the human approves in the app. This is the ONLY way to change tracked state. action is one of: add_tasks (args.tasks: string[]), set_status (args.status: active|blocked|idle|done), set_priority (args.priority: low|medium|high), add_link (args.url, args.label). Always include a clear rationale.',
+  parameters: {
+    type: 'object',
+    properties: {
+      action: { type: 'string', enum: ['add_tasks', 'set_status', 'set_priority', 'add_link'] },
+      rationale: { type: 'string', description: 'Why this change — shown to the human in the approval.' },
+      tasks: { type: 'array', items: { type: 'string' }, description: 'For add_tasks.' },
+      status: { type: 'string', description: 'For set_status.' },
+      priority: { type: 'string', description: 'For set_priority.' },
+      url: { type: 'string', description: 'For add_link.' },
+      label: { type: 'string', description: 'For add_link.' },
+      note: { type: 'string', description: 'Optional note for set_status.' },
+      project_id: { type: 'string', description: 'Board-planner mode only: which project to target. Omit when working a single project.' }
+    },
+    required: ['action', 'rationale']
+  },
+  async run(args, ctx) {
+    // Per-project mode: target is the loop's project. Board-planner mode
+    // (ctx.project is null): caller names the project via project_id.
+    const target = ctx.project || (ctx.boardProjects || []).find(p => p.id === args.project_id);
+    if (!target) {
+      return { error: ctx.boardProjects ? 'at board level, propose requires a valid project_id' : 'propose needs a project context' };
+    }
+    const action = String(args.action || '').trim();
+    let payload;
+    try { payload = buildPayload(action, args); }
+    catch (e) { return { error: e.message }; }
+
+    const pending = await ctx.sb.pendingApprovals(target.id);
+    if (alreadyPending(pending, action, payload)) {
+      return { ok: true, skipped: 'an equivalent proposal is already pending' };
+    }
+
+    const rationale = (args.rationale || '').slice(0, 400);
+    await ctx.sb.createApproval({
+      project_id: target.id,
+      action_type: action,
+      payload,
+      rationale
+    });
+    await ctx.sb.addWorklog({
+      project_id: target.id,
+      kind: 'proposal',
+      summary: rationale || `Proposed ${action}`,
+      detail: { action_type: action, payload },
+      created_by: 'agent'
+    });
+
+    const desc = action === 'add_tasks' ? `add ${payload.tasks.length} task(s)`
+      : action === 'set_status' ? `status → ${payload.status}`
+      : action === 'set_priority' ? `priority → ${payload.priority}`
+      : `link ${payload.label}`;
+    ctx.proposals.push(desc);
+    return { ok: true, proposed: desc, note: 'Filed for human approval in the app inbox.' };
+  }
+};

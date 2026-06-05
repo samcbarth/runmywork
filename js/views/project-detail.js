@@ -1,6 +1,7 @@
 Views.ProjectDetail = (() => {
   let _currentId = null;
   let _menuOpen = false;
+  let _runPollTimer = null;   // live agent-progress polling (cleared on navigate)
 
   function render(id) {
     _currentId = id;
@@ -87,8 +88,10 @@ Views.ProjectDetail = (() => {
         </div>
       </div>
 
+      ${_renderTrackerSection(project)}
       ${_renderSessionsSection(project, isTimerRunning)}
       ${_renderAdvisorSection(project)}
+      ${_renderContextSection(project)}
       ${_renderTasksSection(project)}
       ${_renderLinksSection(project)}
       ${_renderHistorySection(project)}
@@ -101,6 +104,10 @@ Views.ProjectDetail = (() => {
 
     // Close status menu on outside click
     document.addEventListener('click', _closeMenuOnOutside);
+
+    // Load the live agent-progress tracker (and start polling if a run is active).
+    _stopRunPoll();
+    loadRun(id);
   }
 
   function _statusMenuItems(currentStatus) {
@@ -225,6 +232,101 @@ Views.ProjectDetail = (() => {
         <div class="worklog-list" id="worklog-list-${project.id}">
           <p style="color:var(--text-2);font-size:0.85rem;">The agent's journal for this project — proposals, actions, notes.</p>
         </div>
+      </div>`;
+  }
+
+  /* ── Agent progress tracker (Domino's-style) ── */
+
+  const _STAGES = [
+    ['look', 'Look'], ['think', 'Think'], ['do', 'Do'],
+    ['review', 'Review'], ['revise', 'Revise'], ['report', 'Report']
+  ];
+
+  // Empty container; loadRun() fills + reveals it only when a run exists.
+  function _renderTrackerSection(project) {
+    return `<div class="section-card tracker" id="tracker-${project.id}" style="display:none;"></div>`;
+  }
+
+  // Build the tracker markup from an agent_runs row.
+  function _trackerHtml(run) {
+    const curIdx = Math.max(0, _STAGES.findIndex(s => s[0] === run.stage));
+    const running = run.status === 'running';
+    const failed  = run.status === 'failed';
+    const allDone = run.status === 'done';
+
+    const segs = _STAGES.map((s, i) => {
+      let cls = 'future';
+      if (allDone) cls = 'done';
+      else if (i < curIdx) cls = 'done';
+      else if (i === curIdx) cls = running ? 'current' : 'done';
+      return `<div class="tracker-seg ${cls}">
+        <span class="tracker-dot">${cls === 'done' ? '✓' : i + 1}</span>
+        <span class="tracker-seg-label">${s[1]}</span>
+      </div>`;
+    }).join('');
+
+    const pct = Math.max(0, Math.min(100, run.percent || 0));
+    const badge = failed
+      ? '<span class="tracker-badge failed">Failed</span>'
+      : running
+        ? '<span class="tracker-badge working">● Working</span>'
+        : '<span class="tracker-badge done">✓ Done</span>';
+
+    const logByStage = {};
+    (run.log || []).forEach(l => { (logByStage[l.stage] = logByStage[l.stage] || []).push(l); });
+
+    const stageRows = (run.stages || []).map(st => {
+      const label = (_STAGES.find(s => s[0] === st.stage) || [, st.stage])[1];
+      const logs = logByStage[st.stage] || [];
+      const logHtml = logs.length
+        ? `<ul class="tracker-log">${logs.map(l => `<li><span class="tracker-log-t">${Models.formatDateTime(l.t)}</span> ${Models.escapeHtml(l.line)}</li>`).join('')}</ul>`
+        : '<p class="tracker-log-empty">No tool activity recorded.</p>';
+      return `<details class="tracker-stage">
+        <summary><strong>${label}</strong> <span class="tracker-stage-time">${Models.formatDateTime(st.enteredAt)}</span>${st.note ? ` — ${Models.escapeHtml(st.note)}` : ''}</summary>
+        ${logHtml}
+      </details>`;
+    }).join('');
+
+    const when = run.ended_at
+      ? `finished ${Models.formatDays(Date.now() - run.ended_at)} ago`
+      : `started ${Models.formatDays(Date.now() - run.started_at)} ago`;
+
+    return `
+      <div class="section-header" style="margin-bottom:10px;">
+        <span class="section-title">🤖 Agent progress</span>${badge}
+      </div>
+      <div class="tracker-bar">${segs}</div>
+      <div class="tracker-fill-wrap"><div class="tracker-fill" style="width:${pct}%"></div></div>
+      <div class="tracker-meta">Stage ${curIdx + 1} of 6 · ${_STAGES[curIdx][1]} · ${pct}% · ${when}</div>
+      ${run.summary ? `<p class="tracker-summary">${Models.escapeHtml(run.summary)}</p>` : ''}
+      <div class="tracker-stages">${stageRows}</div>`;
+  }
+
+  /* ── Project context / knowledge ── */
+
+  function _renderContextSection(project) {
+    const kinds = ['note', 'requirement', 'decision', 'history', 'instruction', 'goal', 'constraint'];
+    return `
+      <div class="section-card">
+        <div class="section-header">
+          <span class="section-title">📚 Context / Knowledge</span>
+          <button class="btn btn-sm" id="context-load-${project.id}"
+            onclick="Views.ProjectDetail.loadContext('${project.id}')">Load</button>
+        </div>
+        <p style="color:var(--text-2);font-size:0.8rem;margin:0 0 10px;">
+          Background the agent reads as memory — requirements, decisions, history, instructions.
+          Appended, never overwritten. <strong>No secrets</strong> (this syncs to a shared store).
+        </p>
+        <div class="context-add">
+          <select class="form-input" id="context-kind-${project.id}" style="max-width:170px;">
+            ${kinds.map(k => `<option value="${k}">${k}</option>`).join('')}
+          </select>
+          <textarea class="form-input" id="context-text-${project.id}" rows="4"
+            placeholder="Add context, requirements, notes, decisions, constraints…"></textarea>
+          <button class="btn btn-sm btn-primary" id="context-save-${project.id}"
+            onclick="Views.ProjectDetail.saveContext('${project.id}')">Save update</button>
+        </div>
+        <div class="context-list" id="context-list-${project.id}"></div>
       </div>`;
   }
 
@@ -469,5 +571,82 @@ Views.ProjectDetail = (() => {
     return h > 0 ? `${h}h ${m}m` : `${m}m`;
   }
 
-  return { render, toggleStatusMenu, changeStatus, deleteSession, addLink, deleteLink, addTask, toggleTask, deleteTask, requestAdvice, decideProposal, loadWorklog };
+  /* ── Agent progress tracker: load + live poll ── */
+
+  async function loadRun(projectId) {
+    const el = document.getElementById(`tracker-${projectId}`);
+    if (!el) return;
+    const { ok, run } = await Sync.pullLatestRun(projectId);
+    if (!ok || !run) { el.style.display = 'none'; return; }
+    el.innerHTML = _trackerHtml(run);
+    el.style.display = '';
+    if (run.status === 'running') _startRunPoll(projectId);
+  }
+
+  function _startRunPoll(projectId) {
+    _stopRunPoll();
+    _runPollTimer = setInterval(async () => {
+      // Self-cancel if the user navigated away from this project.
+      if (!location.hash.includes('project/' + projectId)) { _stopRunPoll(); return; }
+      const el = document.getElementById(`tracker-${projectId}`);
+      if (!el) { _stopRunPoll(); return; }
+      const { ok, run } = await Sync.pullLatestRun(projectId);
+      if (ok && run) {
+        el.innerHTML = _trackerHtml(run);
+        el.style.display = '';
+        if (run.status !== 'running') _stopRunPoll();
+      }
+    }, 4000);
+  }
+
+  function _stopRunPoll() {
+    if (_runPollTimer) { clearInterval(_runPollTimer); _runPollTimer = null; }
+  }
+
+  /* ── Project context / knowledge: load + save ── */
+
+  async function loadContext(projectId) {
+    const list = document.getElementById(`context-list-${projectId}`);
+    const btn  = document.getElementById(`context-load-${projectId}`);
+    if (!list) return;
+    if (btn) { btn.disabled = true; btn.textContent = 'Loading…'; }
+
+    const { ok, entries } = await Sync.pullContext(projectId);
+    if (btn) { btn.disabled = false; btn.textContent = '↻ Reload'; }
+
+    if (!ok) { list.innerHTML = '<p style="color:var(--c-blocked);font-size:0.85rem;">Could not load context.</p>'; return; }
+    if (!entries.length) { list.innerHTML = '<p style="color:var(--text-2);font-size:0.85rem;">No context yet. Add the first note above.</p>'; return; }
+
+    list.innerHTML = entries.map(e => `
+      <div class="context-item">
+        <div class="context-item-head">
+          <span class="context-kind">${Models.escapeHtml(e.kind || 'note')}</span>
+          <span class="context-item-time">${Models.formatDateTime(e.created_at)} · ${Models.escapeHtml(e.created_by || 'user')}</span>
+        </div>
+        <div class="context-content">${Models.escapeHtml(e.content || '')}</div>
+      </div>`).join('');
+  }
+
+  async function saveContext(projectId) {
+    const ta = document.getElementById(`context-text-${projectId}`);
+    const kindEl = document.getElementById(`context-kind-${projectId}`);
+    const btn = document.getElementById(`context-save-${projectId}`);
+    const content = ta ? ta.value.trim() : '';
+    if (!content) { ta && ta.focus(); return; }
+    const kind = kindEl ? kindEl.value : 'note';
+
+    if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+    const res = await Sync.addContext({ project_id: projectId, kind, content, created_by: 'user' });
+    if (btn) { btn.disabled = false; btn.textContent = 'Save update'; }
+
+    if (!res.ok) { alert('Could not save context: ' + (res.reason || 'unknown error')); return; }
+    if (ta) ta.value = '';
+    loadContext(projectId);
+  }
+
+  return {
+    render, toggleStatusMenu, changeStatus, deleteSession, addLink, deleteLink,
+    addTask, toggleTask, deleteTask, requestAdvice, decideProposal, loadWorklog,
+    loadRun, loadContext, saveContext
+  };
 })();

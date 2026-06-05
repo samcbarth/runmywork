@@ -1,0 +1,36 @@
+@echo off
+REM ── RunMyWork agent runtime — Windows launcher ────────────────────
+REM Copy this file to "run-agent.bat" (gitignored) and fill in your keys.
+REM Then run it directly, or point Task Scheduler at it. The agent reads your
+REM projects, works each one with a tool loop, and files gated proposals.
+
+REM ── Required: Supabase project URL + service_role key (stays on this box) ──
+set SUPABASE_URL=https://YOUR-PROJECT-REF.supabase.co
+set SUPABASE_SERVICE_ROLE_KEY=REPLACE_ME
+
+REM ── Ollama (the local model that drives the loop) ──
+set OLLAMA_MODEL=llama3.1
+REM set OLLAMA_HOST=http://127.0.0.1:11434
+
+REM Optional model split: planner reasons (top loop + board planning), worker does
+REM delegated grunt work. Unset = both use OLLAMA_MODEL.
+REM set OLLAMA_PLANNER_MODEL=llama3.1
+REM set OLLAMA_WORKER_MODEL=llama3.2
+
+REM ── Loop tuning ──
+REM set AGENT_BUDGET=12          REM max tool steps per project
+REM set AGENT_MAX_PROJECTS=3     REM how many projects per scheduled run
+REM set AGENT_MAX_DEPTH=2        REM how deep delegation may nest
+REM set AGENT_FORCE=1            REM work every open project, ignore the "needs it" filter
+
+REM ── Web search backend (keyless) ──
+REM Leave unset to use DuckDuckGo. Point at your own SearXNG for better results:
+REM set AGENT_SEARXNG_URL=http://127.0.0.1:8080
+
+REM ── Power tools — OFF by default. Read AGENT.md before enabling. ──
+REM set AGENT_ALLOW_SHELL=1                       REM let it run allowlisted commands (jailed to its work dir)
+REM set AGENT_SHELL_ALLOW=node,npm,git,python     REM tighten/extend the command allowlist
+REM set AGENT_ALLOW_BUILD_TOOL=1                  REM let it write & load new tools (arbitrary code in-process!)
+
+REM Pass-through args (e.g. --all, --project <id>, --force):
+node "%~dp0agent\run.js" %*
