@@ -28,6 +28,25 @@ function preview(args) {
   } catch { return ''; }
 }
 
+function trunc(s, n) { s = String(s || ''); return s.length > n ? s.slice(0, n - 1) + '…' : s; }
+
+// Human-readable "what the agent referenced" for the tracker log, so the user can
+// see the actual query/URL/file behind each step — not just the tool name.
+function describeCall(name, args) {
+  const a = args || {};
+  switch (name) {
+    case 'web_search':   return `searched: ${trunc(a.query, 60)}`;
+    case 'fetch_url':    return `read: ${trunc(a.url, 70)}`;
+    case 'files':        return `file ${a.op || ''} ${trunc(a.path, 40)}`.trim();
+    case 'save_artifact':return `saved: ${trunc(a.filename || a.summary, 50)}`;
+    case 'propose':      return `proposed: ${a.action || ''}`.trim();
+    case 'note':         return `noted: ${trunc(a.summary, 60)}`;
+    case 'delegate':     return `delegated: ${trunc(a.goal, 55)}`;
+    case 'done':         return 'finished';
+    default:             return name;
+  }
+}
+
 function boardSystemPrompt() {
   return `You are the planning agent inside RunMyWork, a personal project hub. You see
 the WHOLE board — every open project — and your job is to decide where effort
@@ -191,7 +210,7 @@ async function runLoop(opts) {
       // feed the tracker (the `stage` tool updates stage/percent itself)
       if (name !== 'stage') {
         const errored = typeof result === 'string' && result.includes('"error"');
-        await pushRunLog(`${name}${errored ? ' — error' : ''}`);
+        await pushRunLog(`${describeCall(name, args)}${errored ? ' — error' : ''}`);
       }
 
       // build_tool may have grown the toolset

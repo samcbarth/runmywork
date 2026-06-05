@@ -984,6 +984,19 @@ svg { display: block; }
 .context-item-time { font-size: 0.72rem; color: var(--text-2); }
 .context-content { font-size: 0.86rem; white-space: pre-wrap; word-break: break-word; }
 
+/* ── Worklog detail (what the agent referenced / produced) ───────── */
+.worklog-detail {
+  margin-top: 6px; padding: 8px 10px; background: var(--surface-2);
+  border-radius: var(--radius-sm); font-size: 0.82rem; color: var(--text);
+  white-space: pre-wrap; word-break: break-word; max-height: 180px; overflow: auto;
+}
+.worklog-tasks { margin: 6px 0 0; padding-left: 18px; font-size: 0.82rem; }
+.worklog-tasks li { margin: 2px 0; }
+.worklog-chip, .worklog-file {
+  display: inline-block; margin: 6px 6px 0 0; padding: 2px 8px; font-size: 0.74rem;
+  border-radius: 999px; background: var(--surface-2); color: var(--text-2);
+}
+
 /* ── Responsive ──────────────────────────────────────────────────── */
 @media (max-width: 480px) {
   .view-root { padding: 12px 12px 80px; }

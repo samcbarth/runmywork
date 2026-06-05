@@ -106,10 +106,12 @@ Views.ProjectDetail = (() => {
     document.addEventListener('click', _closeMenuOnOutside);
 
     // Live agent-progress tracker (auto-poll while a run is active) + show the
-    // project's context inline without needing the Load button.
+    // project's context and the agent journal inline without a Load click, so the
+    // info the agent referenced/produced is always visible.
     _stopRunPoll();
     loadRun(id);
     loadContext(id);
+    loadWorklog(id);
   }
 
   function _statusMenuItems(currentStatus) {
@@ -563,8 +565,33 @@ Views.ProjectDetail = (() => {
         <div class="history-content">
           <div class="history-status">${icon[e.kind] || '•'} ${Models.escapeHtml(e.summary || e.kind)}</div>
           <div class="history-date">${Models.formatDateTime(e.created_at)} · ${Models.escapeHtml(e.created_by || '')}</div>
+          ${_worklogDetail(e)}
         </div>
       </div>`).join('');
+  }
+
+  // Render the substance behind a journal entry — the actual info the agent
+  // referenced or produced (research text, artifact preview, proposed items),
+  // so "it mentions Booty" is backed by visible content, not just a headline.
+  function _worklogDetail(e) {
+    const d = e.detail || {};
+    let html = '';
+    const block = txt => `<div class="worklog-detail">${Models.escapeHtml(String(txt))}</div>`;
+
+    if (d.preview) html += block(d.preview);               // saved artifact content
+    else if (d.text) html += block(d.text);                // observation / note body
+    else if (d.summary && d.summary !== e.summary) html += block(d.summary);  // run summary
+
+    // proposed items (tasks / status / priority / link)
+    const payload = d.payload || {};
+    const tasks = (Array.isArray(d.tasks) && d.tasks) || (Array.isArray(payload.tasks) && payload.tasks);
+    if (tasks && tasks.length) html += `<ul class="worklog-tasks">${tasks.map(t => `<li>${Models.escapeHtml(t)}</li>`).join('')}</ul>`;
+    const sc = d.statusChange || payload.status;
+    if (sc && !tasks) html += `<div class="worklog-chip">→ ${Models.escapeHtml(sc)}</div>`;
+    if (payload.priority) html += `<div class="worklog-chip">priority → ${Models.escapeHtml(payload.priority)}</div>`;
+
+    if (d.file) html += `<div class="worklog-file">📄 ${Models.escapeHtml(d.file)}</div>`;
+    return html;
   }
 
   function _fmtElapsed(ms) {
