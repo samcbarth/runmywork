@@ -25,6 +25,10 @@
     <button class="app-title-btn" onclick="App.navigate('')">
       <span class="app-title">RunMyWork</span>
     </button>
+    <button class="agent-chip" id="agent-chip" onclick="App.runAgentNow()" title="Cloud agent — tap to run now">
+      <span class="agent-chip-dot" id="agent-chip-dot"></span>
+      <span class="agent-chip-text" id="agent-chip-text">🤖</span>
+    </button>
     <button class="icon-btn" onclick="App.navigate('approvals')" aria-label="Approvals inbox" title="Approvals inbox" style="position:relative;">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <path d="M22 12h-6l-2 3h-4l-2-3H2"/>

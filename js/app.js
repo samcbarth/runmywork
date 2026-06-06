@@ -1,6 +1,6 @@
 const App = (() => {
   // Bumped on each deploy so you can confirm which build is live (shown in Settings).
-  const BUILD = '2026-06-06 · agent cooldown UI + tool_call fix';
+  const BUILD = '2026-06-06 · live agent timer chip';
 
   let _timerInterval = null;
   let _swRegistration = null;
@@ -217,6 +217,47 @@ const App = (() => {
     setTimeout(() => { el.style.opacity = '0'; }, 5000);
   }
 
+  /* ── Cloud-agent header chip (always-visible cooldown timer) ── */
+
+  let _agentTickTimer = null;
+  let _agentRunUntil = 0;   // optimistic "running" window after a trigger this session
+
+  function _fmtClock(ms) {
+    const total = Math.ceil(ms / 1000);
+    const m = Math.floor(total / 60);
+    const s = total % 60;
+    return `${m}:${String(s).padStart(2, '0')}`;
+  }
+
+  function _renderAgentChip() {
+    const chip = document.getElementById('agent-chip');
+    const txt  = document.getElementById('agent-chip-text');
+    if (!chip || !txt) return;
+    const remaining = Sync.triggerCooldownRemaining();
+    const running = Date.now() < _agentRunUntil;
+    chip.classList.toggle('running', running);
+    chip.classList.toggle('cooling', remaining > 0 && !running);
+    if (running)            txt.textContent = '🤖 Running…';
+    else if (remaining > 0) txt.textContent = `🤖 ${_fmtClock(remaining)}`;
+    else                    txt.textContent = '🤖 Ready';
+  }
+
+  function _startAgentChipTicker() {
+    _renderAgentChip();
+    if (_agentTickTimer) clearInterval(_agentTickTimer);
+    _agentTickTimer = setInterval(_renderAgentChip, 1000);
+  }
+
+  // Tapping the chip forces a run, bypassing the cooldown.
+  async function runAgentNow() {
+    const chip = document.getElementById('agent-chip');
+    if (chip) chip.classList.add('running');
+    const res = await Sync.triggerAgent({ force: true });
+    if (res.triggered) _agentRunUntil = Date.now() + 120000;
+    showAgentStatus(res);
+    _renderAgentChip();
+  }
+
   function getBuild() { return BUILD; }
 
   /* ── Init ── */
@@ -238,12 +279,19 @@ const App = (() => {
     Views.Approvals.updateBadge();
     Views.Approvals.autoApplyPending();          // silently apply any auto-approve policies
     Views.Approvals.notifyCriterionReview();     // notify if criterion proposals are pending
-    Sync.triggerAgent().then(showAgentStatus);   // kick off a GitHub Actions run (20-min cooldown)
+
+    // Kick off a GitHub Actions run (20-min cooldown) and keep the header chip ticking.
+    Sync.triggerAgent().then(res => {
+      if (res.triggered) _agentRunUntil = Date.now() + 120000;
+      showAgentStatus(res);
+      _renderAgentChip();
+    });
+    _startAgentChipTicker();
 
     _handleRoute();
   }
 
   document.addEventListener('DOMContentLoaded', init);
 
-  return { navigate, refresh, openModal, openModalFull, closeModal, startGlobalTimer, stopGlobalTimer, syncPush, syncPushProject, checkForUpdate, getBuild, showAgentStatus };
+  return { navigate, refresh, openModal, openModalFull, closeModal, startGlobalTimer, stopGlobalTimer, syncPush, syncPushProject, checkForUpdate, getBuild, showAgentStatus, runAgentNow };
 })();

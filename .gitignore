@@ -12,3 +12,6 @@ node_modules/
 
 # Supabase CLI scratch
 supabase/.temp/
+
+# Local dev preview config
+.claude/

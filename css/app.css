@@ -98,6 +98,38 @@ svg { display: block; }
 }
 .icon-btn-accent:hover { background: var(--accent-hover); color: #fff; }
 
+/* Cloud-agent status chip — always visible, ticks the trigger cooldown. */
+.agent-chip {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 0.72rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s;
+}
+.agent-chip:hover { color: var(--text); background: var(--surface); }
+.agent-chip-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--c-active);
+  flex-shrink: 0;
+}
+.agent-chip.cooling .agent-chip-dot { background: var(--c-idle); }
+.agent-chip.running .agent-chip-dot {
+  background: var(--accent);
+  animation: agent-pulse 1.2s ease-in-out infinite;
+}
+@keyframes agent-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+
 /* ── Main view ───────────────────────────────────────────────────── */
 .view-root {
   max-width: var(--max-w);
