@@ -186,4 +186,105 @@ function makeGroq(config) {
   return { chat, reachable, listModels, host: 'groq.com', model: MODEL };
 }
 
-module.exports = { makeGroq };
+// OpenRouter — same OpenAI-compatible API, different base URL + headers.
+// Best free models: meta-llama/llama-3.3-70b-instruct:free, qwen/qwen3-235b-a22b:free
+function makeOpenRouter(config) {
+  const KEY   = config.openRouterKey;
+  const MODEL = config.openRouterModel || 'meta-llama/llama-3.3-70b-instruct:free';
+  const OR_BASE = 'https://openrouter.ai/api/v1';
+
+  async function _post(path, body, ms = 180000) {
+    const ctrl = new AbortController();
+    const tid  = setTimeout(() => ctrl.abort(), ms);
+    try {
+      const res = await fetch(`${OR_BASE}${path}`, {
+        method: 'POST',
+        headers: {
+          Authorization:  `Bearer ${KEY}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer':  'https://samcbarth.github.io/runmywork',
+          'X-Title':       'RunMyWork Agent'
+        },
+        body: JSON.stringify(body),
+        signal: ctrl.signal
+      });
+      if (!res.ok) {
+        const txt = await res.text().catch(() => res.statusText);
+        throw new Error(`OpenRouter ${path} → ${res.status} ${txt}`);
+      }
+      return res.json();
+    } finally {
+      clearTimeout(tid);
+    }
+  }
+
+  async function chat(messages, tools, opts = {}) {
+    const model = opts.model || MODEL;
+    const body = {
+      model,
+      messages: toOpenAI(messages),
+      stream: false,
+      temperature: 0.1,
+    };
+    if (tools && tools.length) {
+      body.tools = sanitizeTools(tools);
+      body.tool_choice = 'auto';
+      body.parallel_tool_calls = false;
+    }
+
+    let data;
+    try {
+      data = await _post('/chat/completions', body, opts.timeout ?? 180000);
+    } catch (e) {
+      const m = e.message.match(/try again in ([\d.]+)s/i);
+      if (m) {
+        const wait = Math.min(Math.ceil(parseFloat(m[1])) * 1000 + 1000, 60000);
+        await new Promise(r => setTimeout(r, wait));
+        data = await _post('/chat/completions', body, opts.timeout ?? 180000);
+      } else { throw e; }
+    }
+
+    const msg = data.choices?.[0]?.message;
+    if (!msg) throw new Error('OpenRouter returned no message in choices[0]');
+
+    if (msg.content) {
+      msg.content = msg.content.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+    }
+
+    const tool_calls = (msg.tool_calls || []).map(tc => ({
+      id: tc.id,
+      function: {
+        name: tc.function.name,
+        arguments: (() => {
+          if (typeof tc.function.arguments === 'object') return tc.function.arguments;
+          try { return JSON.parse(tc.function.arguments); } catch { return {}; }
+        })()
+      }
+    }));
+
+    return { content: msg.content || '', tool_calls };
+  }
+
+  async function reachable() {
+    try {
+      const res = await fetch(`${OR_BASE}/models`, {
+        headers: { Authorization: `Bearer ${KEY}` },
+        signal: AbortSignal.timeout(6000)
+      });
+      return res.ok;
+    } catch { return false; }
+  }
+
+  async function listModels() {
+    try {
+      const res = await fetch(`${OR_BASE}/models`, { headers: { Authorization: `Bearer ${KEY}` } });
+      if (!res.ok) return [];
+      const data = await res.json();
+      return (data.data || []).map(m => m.id);
+    } catch { return []; }
+  }
+
+  return { chat, reachable, listModels, host: 'openrouter.ai', model: MODEL };
+}
+
+module.exports = { makeGroq, makeOpenRouter };

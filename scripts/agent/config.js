@@ -37,10 +37,13 @@ function loadConfig() {
     allowGitWrite:  bool(process.env.AGENT_ALLOW_GIT_WRITE),
     allowGitPush:   bool(process.env.AGENT_ALLOW_GIT_PUSH),
 
-    // Groq cloud provider (optional). When GROQ_API_KEY is set the agent uses
-    // Groq instead of Ollama — llama-3.3-70b-versatile by default.
-    groqKey:   process.env.GROQ_API_KEY || '',
-    groqModel: process.env.GROQ_MODEL || 'qwen/qwen3-32b',
+    // Cloud providers (optional). Priority: Groq → OpenRouter → Ollama.
+    // Groq: 131k TPM free, fastest inference, llama-3.3-70b
+    groqKey:          process.env.GROQ_API_KEY || '',
+    groqModel:        process.env.GROQ_MODEL   || 'llama-3.3-70b-versatile',
+    // OpenRouter: huge model selection, many free tiers, fallback/alternative
+    openRouterKey:    process.env.OPENROUTER_API_KEY  || '',
+    openRouterModel:  process.env.OPENROUTER_MODEL    || 'meta-llama/llama-3.3-70b-instruct:free',
 
     force: bool(process.env.AGENT_FORCE)
   };

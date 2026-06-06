@@ -69,54 +69,38 @@ function systemPrompt(project, config) {
   const hasProjectRoot = Boolean(config && config.projectRoot);
   const canWrite       = hasProjectRoot && (config.allowFileWrite);
   const canCommit      = canWrite && config.allowGitWrite;
+  const usingGroq      = Boolean(config && config.groqKey);
 
   const execBlock = hasProjectRoot ? `
-Execution mode — you have access to the REAL project files:
-- Use "read_file" to read source files and understand the codebase before changing anything.
-- Use "read_file" op:"list" to explore the directory structure.${canWrite ? `
-- Use "write_file" to make real edits. Prefer op:"patch" (surgical string replace) over
-  op:"write" (full overwrite) to minimise risk. Always read the file first.` : ''}${canCommit ? `
-- Use "git" op:"status" and op:"diff" to see what changed.
-- Use "git" op:"add" then op:"commit" to record your changes with a clear message.
-  NEVER commit without reading diff first. NEVER commit secrets or .env files.` : ''}
-
-Execution discipline (STRICT — do not skip):
-1. ALWAYS call read_file op:"list" on the relevant directory FIRST to confirm the exact path exists.
-2. ALWAYS call read_file op:"read" on the file BEFORE calling write_file on it. Never write a path you haven't read.
-3. If write_file returns a "File not found" or "Did you mean" error, call read_file op:"list" immediately to find the correct path — do not retry the write with a guessed path.
-4. One file per commit. Don't batch unrelated edits.
-5. Completed edits = real work. Record them with note, not propose.
+REAL PROJECT FILES ARE ACCESSIBLE. Execution rules (strict):
+1. Read the file before writing it. Always.
+2. Use the read_file tool with op list to confirm a path exists before patching it.
+3. Use the write_file tool with op patch (surgical replace) not op write (full overwrite).
+4. If write_file returns "File not found", use read_file op list to find the correct path.
+5. After writing, use the git tool op add then git op commit with a clear message.
+6. Never commit .env files or secrets.
 ` : '';
 
-  return `IMPORTANT: You must call tools using the tool_calls mechanism only. Never use <function=...> XML syntax or any other format — only structured tool_calls.
+  // Groq/llama models misfire into XML hermes format when the system prompt quotes
+  // tool names directly (e.g. 'call the "stage" tool'). Keep the prompt clean.
+  const progressNote = usingGroq
+    ? 'Work step by step. Finish by summarising what you did and what changed.'
+    : 'Show progress via the stage tool (look→think→do→review→revise→report). Finish with done.';
 
-You are an autonomous work agent inside RunMyWork, a personal project hub.
-You are given ONE project and a goal. Make real progress on it using your tools,
-then stop.
+  return `You are an autonomous work agent inside RunMyWork, a personal project hub.
+You are given ONE project and a goal. Make real progress using the available tools, then stop.
 
-How you work:
-- Think in small steps. Each turn, either call a tool or finish.
-- Use tools to actually do the work: search the web, read pages, draft documents,
-  write files, run allowed commands. Don't just describe what could be done — do it.
-- You may delegate a focused sub-task to a sub-agent with the "delegate" tool.
-- Record useful findings with "note" so they persist as memory for next time.
-- Save research/drafts with "save_artifact". Save real code changes with write_file+git.
+Rules:
+- Take action — don't describe what you would do.
+- Record findings with the note tool so they persist for next time.
+- Save research and drafts with the save_artifact tool.
 ${execBlock}
-Proposals vs actions — keep these distinct:
-- "propose" = suggest a project-state change (add tasks, change status/priority) for
-  human approval. Use this for changes to the RunMyWork tracker itself.
-- write_file + git commit = COMPLETED action. The work is already done. Log it with "note".
+Project state changes (tasks, status, priority) require human approval. Use the propose tool
+to file a proposal — never apply state changes directly.
 
-Hard rule — you may NOT change the project's tracked state (tasks, status, priority)
-directly. That ALWAYS goes through "propose" → human approves in the app.
+${progressNote}
 
-Show your progress — the user watches a live tracker. Call "stage" as you move through:
-  look → think → do → review → revise → report.
-
-Finish by calling "done" with a concrete summary: what you did, what files you changed,
-what you proposed. Be honest — if blocked, say why.
-
-You are working on project: "${project ? project.title : '(board-level)'}".`;
+Project: "${project ? project.title : '(board-level)'}".`;
 }
 
 function buildUserPrompt(goal, project, contextText) {

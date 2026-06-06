@@ -25,7 +25,7 @@
 const { loadConfig, validate } = require('./config');
 const { makeSupabase } = require('./supabase');
 const { makeOllama } = require('./ollama');
-const { makeGroq }   = require('./groq');
+const { makeGroq, makeOpenRouter } = require('./groq');
 const { runLoop } = require('./loop');
 
 function parseArgs(argv) {
@@ -207,15 +207,21 @@ async function main() {
   }
 
   const sb = makeSupabase(config);
-  // Use Groq when key is present, fall back to Ollama.
-  const usingGroq = Boolean(config.groqKey);
-  const ollama = usingGroq ? makeGroq(config) : makeOllama(config);
-  const provider = usingGroq ? `groq:${config.groqModel}` : null;
-  // When Groq is active, point both model slots at the Groq model so the loop
-  // doesn't accidentally pass an Ollama model name to the Groq API.
-  if (usingGroq) {
+  // Provider priority: Groq → OpenRouter → Ollama.
+  let ollama, provider;
+  if (config.groqKey) {
+    ollama   = makeGroq(config);
+    provider = `groq:${config.groqModel}`;
     config.plannerModel = config.groqModel;
     config.workerModel  = config.groqModel;
+  } else if (config.openRouterKey) {
+    ollama   = makeOpenRouter(config);
+    provider = `openrouter:${config.openRouterModel}`;
+    config.plannerModel = config.openRouterModel;
+    config.workerModel  = config.openRouterModel;
+  } else {
+    ollama   = makeOllama(config);
+    provider = null;
   }
   const services = { sb, ollama, config, log, runLoop };
 
