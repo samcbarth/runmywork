@@ -37,6 +37,11 @@ function loadConfig() {
     allowGitWrite:  bool(process.env.AGENT_ALLOW_GIT_WRITE),
     allowGitPush:   bool(process.env.AGENT_ALLOW_GIT_PUSH),
 
+    // Groq cloud provider (optional). When GROQ_API_KEY is set the agent uses
+    // Groq instead of Ollama — llama-3.3-70b-versatile by default.
+    groqKey:   process.env.GROQ_API_KEY || '',
+    groqModel: process.env.GROQ_MODEL || 'qwen/qwen3-32b',
+
     force: bool(process.env.AGENT_FORCE)
   };
 }

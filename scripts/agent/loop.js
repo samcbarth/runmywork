@@ -88,7 +88,9 @@ Execution discipline (STRICT — do not skip):
 5. Completed edits = real work. Record them with note, not propose.
 ` : '';
 
-  return `You are an autonomous work agent inside RunMyWork, a personal project hub.
+  return `IMPORTANT: You must call tools using the tool_calls mechanism only. Never use <function=...> XML syntax or any other format — only structured tool_calls.
+
+You are an autonomous work agent inside RunMyWork, a personal project hub.
 You are given ONE project and a goal. Make real progress on it using your tools,
 then stop.
 

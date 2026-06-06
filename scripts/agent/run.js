@@ -25,6 +25,7 @@
 const { loadConfig, validate } = require('./config');
 const { makeSupabase } = require('./supabase');
 const { makeOllama } = require('./ollama');
+const { makeGroq }   = require('./groq');
 const { runLoop } = require('./loop');
 
 function parseArgs(argv) {
@@ -47,7 +48,7 @@ function log(...args) { console.log('[agent]', ...args); }
 
 // Build a compact two-level file tree from the project root so the model
 // knows exactly which paths exist before attempting any reads or writes.
-function buildFileTree(root) {
+function buildFileTree(root, maxDepth = 2) {
   const fs   = require('fs');
   const path = require('path');
   const SKIP = new Set(['.git', 'node_modules', 'work', '.next', 'dist', 'build', '__pycache__']);
@@ -60,7 +61,7 @@ function buildFileTree(root) {
       const indent = '  '.repeat(depth);
       if (e.isDirectory()) {
         lines.push(`${indent}${e.name}/`);
-        if (depth < 2) walk(path.join(dir, e.name), depth + 1);
+        if (depth < maxDepth) walk(path.join(dir, e.name), depth + 1);
       } else {
         lines.push(`${indent}${e.name}`);
       }
@@ -120,10 +121,11 @@ async function runForProject(services, project, goalOverride, budgetOverride) {
   const contextText = await buildMemory(sb, project.id);
 
   // Inject real file tree so the model never guesses paths.
-  // Prevents hallucinated filenames like "sync.js" when the real file is "js/store.js".
+  // Groq free tier has a tight TPM limit — use a shallow (1-level) tree to save tokens.
   let fileTree = '';
   if (services.config.projectRoot) {
-    try { fileTree = buildFileTree(services.config.projectRoot); } catch { /* best effort */ }
+    const depth = services.config.groqKey ? 1 : 2;
+    try { fileTree = buildFileTree(services.config.projectRoot, depth); } catch { /* best effort */ }
   }
 
   log(`▶ ${project.title}  [${project.status}]`);
@@ -205,7 +207,16 @@ async function main() {
   }
 
   const sb = makeSupabase(config);
-  const ollama = makeOllama(config);
+  // Use Groq when key is present, fall back to Ollama.
+  const usingGroq = Boolean(config.groqKey);
+  const ollama = usingGroq ? makeGroq(config) : makeOllama(config);
+  const provider = usingGroq ? `groq:${config.groqModel}` : null;
+  // When Groq is active, point both model slots at the Groq model so the loop
+  // doesn't accidentally pass an Ollama model name to the Groq API.
+  if (usingGroq) {
+    config.plannerModel = config.groqModel;
+    config.workerModel  = config.groqModel;
+  }
   const services = { sb, ollama, config, log, runLoop };
 
   // fail fast & clear if either dependency is down
@@ -234,8 +245,8 @@ async function main() {
   if (absent.length) log(`⚠ model(s) not found in 'ollama list': ${absent.join(', ')} — pull them or fix OLLAMA_*_MODEL.`);
 
   const split = config.plannerModel !== config.workerModel;
-  log(`${split ? `planner=${config.plannerModel} worker=${config.workerModel}` : `model=${config.plannerModel}`}` +
-      ` host=${ollama.host} budget=${config.budget}` +
+  const modelTag = provider || (split ? `planner=${config.plannerModel} worker=${config.workerModel}` : `model=${config.plannerModel}`);
+  log(`${modelTag} host=${ollama.host} budget=${config.budget}` +
       `${config.allowShell ? ' +shell' : ''}${config.allowBuildTool ? ' +build_tool' : ''}`);
 
   if (args.plan) { await runForBoard(services, projects); return; }

@@ -1,6 +1,6 @@
 const App = (() => {
   // Bumped on each deploy so you can confirm which build is live (shown in Settings).
-  const BUILD = '2026-06-05 · native-notif';
+  const BUILD = '2026-06-05 · groq-agent';
 
   let _timerInterval = null;
   let _swRegistration = null;
