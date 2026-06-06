@@ -168,6 +168,28 @@ async function runForProject(services, project, goalOverride, budgetOverride) {
   return result;
 }
 
+// Wrap runForProject with automatic provider fallback.
+// If the primary provider (Groq/OpenRouter) errors on the first step (rate-limit,
+// tool-format rejection) and an OpenAI key is available, retry on gpt-4o-mini.
+async function runForProjectWithFallback(services, project, goalOverride, budgetOverride) {
+  try {
+    return await runForProject(services, project, goalOverride, budgetOverride);
+  } catch (e) {
+    const isPrimaryFree = services.ollama.host !== 'api.openai.com';
+    const hasOpenAI = services.config.openAIKey;
+    if (isPrimaryFree && hasOpenAI) {
+      log(`   ⚡ ${services.ollama.host} failed (${e.message.slice(0,60)}) — falling back to openai:gpt-4o-mini`);
+      const fallbackServices = {
+        ...services,
+        ollama: makeOpenAI(services.config)
+      };
+      fallbackServices.config = { ...services.config, plannerModel: services.config.openAIModel, workerModel: services.config.openAIModel };
+      return await runForProject(fallbackServices, project, goalOverride, budgetOverride);
+    }
+    throw e;
+  }
+}
+
 // Phase 3: one loop that sees the whole board and decides where effort should go,
 // filing per-project proposals (targeted by id) instead of working inside one.
 function boardSnapshot(projects) {
@@ -217,35 +239,32 @@ async function main() {
   }
 
   const sb = makeSupabase(config);
-  // Provider selection:
-  //   --local          → always Ollama (free, good for research/proposals)
-  //   --cloud          → always best available cloud
-  //   auto (default)   → cloud if goal involves code edits, otherwise Ollama
-  //   no cloud keys    → always Ollama
-  const hasCloud = config.openAIKey || config.groqKey || config.openRouterKey;
-  const goalText = args.goal || '';
-  const useCloud = !config.forceLocal && hasCloud &&
-    (config.forceCloud || goalNeedsCloud(goalText) || !config.ollamaModel);
+  // Provider priority (free-first):
+  //   1. Groq          — free, llama-3.3-70b, 131k TPM / 6k req day
+  //   2. OpenRouter    — free model tier (llama-3.3-70b:free), rate-limited
+  //   3. OpenAI        — paid fallback (~$0.005/run), only when free exhausted
+  //   4. Ollama local  — always available, --local forces this
+  //
+  // --local  → always Ollama regardless of cloud keys
+  // --cloud  → skip Groq/OpenRouter, go straight to OpenAI
 
   let ollama, provider;
-  if (useCloud && config.openAIKey) {
-    ollama   = makeOpenAI(config);
-    provider = `openai:${config.openAIModel}`;
-    config.plannerModel = config.openAIModel;
-    config.workerModel  = config.openAIModel;
-  } else if (useCloud && config.groqKey) {
-    ollama   = makeGroq(config);
-    provider = `groq:${config.groqModel}`;
-    config.plannerModel = config.groqModel;
-    config.workerModel  = config.groqModel;
-  } else if (useCloud && config.openRouterKey) {
-    ollama   = makeOpenRouter(config);
-    provider = `openrouter:${config.openRouterModel}`;
-    config.plannerModel = config.openRouterModel;
-    config.workerModel  = config.openRouterModel;
+  if (config.forceLocal) {
+    ollama = makeOllama(config); provider = null;
+  } else if (config.forceCloud && config.openAIKey) {
+    ollama = makeOpenAI(config); provider = `openai:${config.openAIModel}`;
+    config.plannerModel = config.openAIModel; config.workerModel = config.openAIModel;
+  } else if (config.groqKey) {
+    ollama = makeGroq(config); provider = `groq:${config.groqModel}`;
+    config.plannerModel = config.groqModel; config.workerModel = config.groqModel;
+  } else if (config.openRouterKey) {
+    ollama = makeOpenRouter(config); provider = `openrouter:${config.openRouterModel}`;
+    config.plannerModel = config.openRouterModel; config.workerModel = config.openRouterModel;
+  } else if (config.openAIKey) {
+    ollama = makeOpenAI(config); provider = `openai:${config.openAIModel}`;
+    config.plannerModel = config.openAIModel; config.workerModel = config.openAIModel;
   } else {
-    ollama   = makeOllama(config);
-    provider = null;
+    ollama = makeOllama(config); provider = null;
   }
   const services = { sb, ollama, config, log, runLoop };
 
@@ -303,7 +322,7 @@ async function main() {
 
   for (const project of targets) {
     try {
-      await runForProject(services, project, args.project ? args.goal : undefined, args.budget);
+      await runForProjectWithFallback(services, project, args.project ? args.goal : undefined, args.budget);
     } catch (e) {
       log(`   ✗ ${project.title} failed: ${e.message}`);
     }
