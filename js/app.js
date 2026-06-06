@@ -1,6 +1,6 @@
 const App = (() => {
   // Bumped on each deploy so you can confirm which build is live (shown in Settings).
-  const BUILD = '2026-06-05 · groq-agent';
+  const BUILD = '2026-06-05 · openai-agent';
 
   let _timerInterval = null;
   let _swRegistration = null;
