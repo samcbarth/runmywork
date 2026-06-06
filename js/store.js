@@ -10,7 +10,8 @@ const Store = (() => {
     notificationsEnabled: false,
     thresholds: { blockedDaysWarning: 1, idleDaysWarning: 1, dailyReminderTime: '09:00' },
     lastNotificationCheck: 0,
-    theme: 'auto'
+    theme: 'auto',
+    autoApprove: { add_tasks: false, add_link: false, set_priority: false, set_status: false, set_spec: false }
   };
 
   /* ── Projects ── */
@@ -120,7 +121,8 @@ const Store = (() => {
       return {
         ...DEFAULT_SETTINGS,
         ...stored,
-        thresholds: { ...DEFAULT_SETTINGS.thresholds, ...(stored.thresholds || {}) }
+        thresholds: { ...DEFAULT_SETTINGS.thresholds, ...(stored.thresholds || {}) },
+        autoApprove: { ...DEFAULT_SETTINGS.autoApprove, ...(stored.autoApprove || {}) }
       };
     } catch { return { ...DEFAULT_SETTINGS }; }
   }

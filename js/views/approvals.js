@@ -50,6 +50,7 @@ Views.Approvals = (() => {
 
     // Refresh from the server so the inbox reflects new advisor proposals.
     await Sync.pullApprovals();
+    await autoApplyPending();
     updateBadge();
     _renderList();
   }
@@ -172,6 +173,27 @@ Views.Approvals = (() => {
     App.refresh();
   }
 
+  /* Auto-apply approvals that match the user's policy — called after every pull.
+   * Returns the number of proposals silently applied. */
+  async function autoApplyPending() {
+    const settings = Store.getSettings();
+    const policies = settings.autoApprove || {};
+    const toApply = Store.getApprovals().filter(a => policies[a.action_type]);
+    if (!toApply.length) return 0;
+    for (const a of toApply) {
+      _apply(a);
+      Sync.addWorklog({
+        project_id: a.project_id, kind: 'action', created_by: 'auto-policy',
+        summary: `Auto-approved: ${_summary(a)}`,
+        detail: { action_type: a.action_type, payload: a.payload }
+      });
+      await Sync.decideApproval(a.id, 'applied');
+    }
+    updateBadge();
+    App.refresh();
+    return toApply.length;
+  }
+
   /* Sync the header badge with the pending count. Safe to call from anywhere. */
   function updateBadge() {
     const badge = document.getElementById('approvals-badge');
@@ -185,5 +207,5 @@ Views.Approvals = (() => {
     }
   }
 
-  return { render, approve, reject, updateBadge };
+  return { render, approve, reject, updateBadge, autoApplyPending };
 })();

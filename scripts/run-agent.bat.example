@@ -23,6 +23,11 @@ REM set AGENT_MAX_PROJECTS=3     REM how many projects per scheduled run
 REM set AGENT_MAX_DEPTH=2        REM how deep delegation may nest
 REM set AGENT_FORCE=1            REM work every open project, ignore the "needs it" filter
 
+REM ── GitHub integration (optional) ──
+REM Fine-grained PAT scoped to the repos the agent should touch. Enables the
+REM "github" tool: create_pr, list_prs, list_issues, create_issue, list_commits.
+REM set GITHUB_TOKEN=github_pat_REPLACE_ME
+
 REM ── Web search backend (keyless) ──
 REM Leave unset to use DuckDuckGo. Point at your own SearXNG for better results:
 REM set AGENT_SEARXNG_URL=http://127.0.0.1:8080

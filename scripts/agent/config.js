@@ -48,7 +48,11 @@ function loadConfig() {
     openRouterKey:    process.env.OPENROUTER_API_KEY  || '',
     openRouterModel:  process.env.OPENROUTER_MODEL    || 'meta-llama/llama-3.3-70b-instruct:free',  // free tier
 
-    force: bool(process.env.AGENT_FORCE)
+    force: bool(process.env.AGENT_FORCE),
+
+    // GitHub integration (optional). Set GITHUB_TOKEN to enable the github tool.
+    // Use a fine-grained PAT scoped to the repos the agent should touch.
+    githubToken: process.env.GITHUB_TOKEN || ''
   };
 }
 

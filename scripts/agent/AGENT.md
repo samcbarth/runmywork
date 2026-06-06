@@ -53,6 +53,7 @@ Phase 1 guarantee: *the agent proposes, the human disposes.*
 | `delegate`     | on  | Spawn a sub-agent for a focused sub-goal (own budget/model, depth-capped). |
 | `stage`        | on  | Announce workflow phase (look→think→do→review→revise→report) for the live tracker. |
 | `done`         | on  | Finish with a summary. |
+| `github`       | off (needs key) | GitHub API: `list_repos`, `list_prs`, `get_pr`, `create_pr`, `list_issues`, `create_issue`, `list_commits`. Enabled when `GITHUB_TOKEN` is set. |
 | `shell`        | **off** | Run one allowlisted binary, no shell chaining, jailed cwd. `AGENT_ALLOW_SHELL=1`. |
 | `build_tool`   | **off** | Write & load a new tool. ⚠️ arbitrary code in-process. `AGENT_ALLOW_BUILD_TOOL=1`. |
 
@@ -169,3 +170,4 @@ Hourly is a sane default for the heavier loop (the 30-min advisor can stay too).
 | `AGENT_SHELL_ALLOW`          | *(built-in list)*        | CSV of allowed binaries |
 | `AGENT_ALLOW_BUILD_TOOL`     | *(off)*                  | `1` enables `build_tool` (arbitrary code) |
 | `AGENT_FORCE`                | *(off)*                  | `1` = work every open project |
+| `GITHUB_TOKEN`               | *(unset → tool disabled)*| Fine-grained PAT enabling the `github` tool |

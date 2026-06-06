@@ -1,4 +1,19 @@
 Views.Settings = (() => {
+  function _autoApproveRow(key, label, desc, policies) {
+    const checked = (policies && policies[key]) ? 'checked' : '';
+    return `
+      <div class="setting-row">
+        <div class="setting-info">
+          <div class="setting-label">${label}</div>
+          <div class="setting-desc">${desc}</div>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" class="aa-toggle" data-key="${key}" ${checked}>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>`;
+  }
+
   function render() {
     const settings   = Store.getSettings();
     const permStatus = typeof Notification !== 'undefined' ? Notification.permission : 'unsupported';
@@ -42,6 +57,21 @@ Views.Settings = (() => {
           <input type="number" id="blocked-days-input" min="1" value="1" />
         </div>
         <button class="btn btn-primary" id="save-notif-btn" style="margin-top:12px;">Save</button>
+      </div>
+
+      <!-- ── Auto-approve ── -->
+      <div class="settings-section">
+        <div class="settings-section-title">Auto-approve (Agent proposals)</div>
+        <p style="font-size:0.82rem;color:var(--text-2);line-height:1.6;margin-bottom:12px;">
+          When the agent proposes these action types, apply them automatically without requiring manual approval.
+          Leave off for anything that changes status or spec until you trust the agent's judgment.
+        </p>
+        ${_autoApproveRow('add_tasks',    'Add tasks',       'Automatically accept task additions from the agent.',                   settings.autoApprove)}
+        ${_autoApproveRow('add_link',     'Add links',       'Automatically accept new project links.',                              settings.autoApprove)}
+        ${_autoApproveRow('set_priority', 'Set priority',    'Automatically accept priority changes.',                               settings.autoApprove)}
+        ${_autoApproveRow('set_status',   'Set status',      'Automatically accept status changes — use with caution.',              settings.autoApprove)}
+        ${_autoApproveRow('set_spec',     'Set project spec','Automatically accept new goal / success criteria — use with caution.', settings.autoApprove)}
+        <button class="btn btn-primary" id="save-aa-btn" style="margin-top:12px;">Save</button>
       </div>
 
       <!-- ── Data ── -->
@@ -97,6 +127,8 @@ Views.Settings = (() => {
 
     document.getElementById('save-notif-btn').addEventListener('click', _saveNotifSettings);
 
+    document.getElementById('save-aa-btn').addEventListener('click', _saveAutoApprove);
+
     const updateBtn = document.getElementById('update-btn');
     if (updateBtn) updateBtn.addEventListener('click', () => {
       updateBtn.textContent = '⟳ Updating…';
@@ -116,6 +148,20 @@ Views.Settings = (() => {
     setTimeout(() => App.syncPush(), 0);
 
     const btn = document.getElementById('save-notif-btn');
+    btn.textContent = 'Saved ✓';
+    btn.style.background = 'var(--c-active)';
+    setTimeout(() => { btn.textContent = 'Save'; btn.style.background = ''; }, 2000);
+  }
+
+  function _saveAutoApprove() {
+    const settings = Store.getSettings();
+    const autoApprove = {};
+    document.querySelectorAll('.aa-toggle').forEach(el => {
+      autoApprove[el.dataset.key] = el.checked;
+    });
+    settings.autoApprove = autoApprove;
+    Store.saveSettings(settings);
+    const btn = document.getElementById('save-aa-btn');
     btn.textContent = 'Saved ✓';
     btn.style.background = 'var(--c-active)';
     setTimeout(() => { btn.textContent = 'Save'; btn.style.background = ''; }, 2000);
@@ -155,5 +201,5 @@ Views.Settings = (() => {
     Views.Dashboard.render();
   }
 
-  return { render, exportData, importData, clearAll };
+  return { render, exportData, importData, clearAll, _saveAutoApprove };
 })();

@@ -685,15 +685,16 @@ Views.ProjectDetail = (() => {
     catch { if (section) section.style.display = 'none'; return; }
 
     const rows = (res && res.entries) || [];
-    const by = { goal: [], requirement: [], success_criteria: [], constraint: [] };
-    rows.forEach(r => { if (by[r.kind]) by[r.kind].push((r.content || '').trim()); });
+    const by = { goal: [], requirement: [], success_criteria: [], constraint: [], decision: [] };
+    rows.forEach(r => { if (by[r.kind] !== undefined) by[r.kind].push((r.content || '').trim()); });
     const uniq = a => [...new Set(a.filter(Boolean))];
     const goal = by.goal[0] || '';                          // newest goal (rows are desc)
     const reqs = uniq(by.requirement.slice().reverse());
     const crit = uniq(by.success_criteria.slice().reverse());
     const cons = uniq(by.constraint.slice().reverse());
+    const decs = uniq(by.decision.slice().reverse());
 
-    if (!goal && !crit.length) { if (section) section.style.display = 'none'; return; }
+    if (!goal && !crit.length && !decs.length) { if (section) section.style.display = 'none'; return; }
 
     const block = (label, arr, ordered) => {
       if (!arr.length) return '';
@@ -704,7 +705,8 @@ Views.ProjectDetail = (() => {
       (goal ? `<div class="spec-block"><div class="spec-label">Goal</div><div class="spec-goal">${Models.escapeHtml(goal)}</div></div>` : '') +
       block('Requirements', reqs, false) +
       block('Success criteria', crit, true) +
-      block('Constraints', cons, false);
+      block('Constraints', cons, false) +
+      block('Decisions', decs, false);
     if (section) section.style.display = '';
   }
 
