@@ -288,12 +288,14 @@ const Sync = (() => {
       sessions: r.sessions || [], totalMinutes: r.total_minutes || 0,
       blockedReason: r.blocked_reason || '', snoozedUntil: r.snoozed_until ?? null,
       links: r.links || [], tasks: r.tasks || [],
+      summary: r.summary || '',
       aiSuggestion: r.ai_suggestion ?? null, aiRequested: !!r.ai_requested
     };
   }
   function projectToRow(p) {
     return {
       id: p.id, title: p.title, description: p.description,
+      summary: p.summary || '',
       status: p.status, priority: p.priority, tags: p.tags || [],
       created_at: p.createdAt, updated_at: p.updatedAt,
       status_history: p.statusHistory || [],

@@ -1,6 +1,6 @@
 const App = (() => {
   // Bumped on each deploy so you can confirm which build is live (shown in Settings).
-  const BUILD = '2026-06-06 · github-tool + auto-approve';
+  const BUILD = '2026-06-06 · criterion-done + summary + notifications';
 
   let _timerInterval = null;
   let _swRegistration = null;
@@ -206,6 +206,7 @@ const App = (() => {
     if (result.ok) Store.refreshNotifyCache();   // seed SW cache from synced data
     Views.Approvals.updateBadge();
     Views.Approvals.autoApplyPending();          // silently apply any auto-approve policies
+    Views.Approvals.notifyCriterionReview();     // notify if criterion proposals are pending
 
     _handleRoute();
   }

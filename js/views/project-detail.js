@@ -62,6 +62,7 @@ Views.ProjectDetail = (() => {
 
         <h2 class="detail-title">${Models.escapeHtml(project.title)}</h2>
         ${blockedNote}
+        ${project.summary ? `<p class="detail-summary">${Models.escapeHtml(project.summary)}</p>` : ''}
         ${project.description ? `<p class="detail-desc">${Models.escapeHtml(project.description)}</p>` : ''}
         ${tags}
         ${timerBanner}
@@ -212,11 +213,13 @@ Views.ProjectDetail = (() => {
   function _proposalSummary(a) {
     const p = a.payload || {};
     switch (a.action_type) {
-      case 'add_tasks':    return `Add ${Array.isArray(p.tasks) ? p.tasks.length : 0} task(s)`;
-      case 'set_status':   return `Set status → ${p.status}`;
-      case 'set_priority': return `Set priority → ${p.priority}`;
-      case 'add_link':     return `Add link: ${p.label || p.url || ''}`;
-      default:             return a.action_type;
+      case 'add_tasks':           return `Add ${Array.isArray(p.tasks) ? p.tasks.length : 0} task(s)`;
+      case 'set_status':          return `Set status → ${p.status}`;
+      case 'set_priority':        return `Set priority → ${p.priority}`;
+      case 'add_link':            return `Add link: ${p.label || p.url || ''}`;
+      case 'update_description':  return 'Update project description & summary';
+      case 'mark_criterion_done': return `Criterion done: "${(p.criterion || '').slice(0, 60)}"`;
+      default:                    return a.action_type;
     }
   }
 
@@ -224,6 +227,18 @@ Views.ProjectDetail = (() => {
     const p = a.payload || {};
     if (a.action_type === 'add_tasks' && Array.isArray(p.tasks) && p.tasks.length) {
       return `<ul class="approval-detail-list" style="margin:0;padding-left:18px;">${p.tasks.map(t => `<li>${Models.escapeHtml(t)}</li>`).join('')}</ul>`;
+    }
+    if (a.action_type === 'update_description') {
+      return [
+        p.summary     ? `<div style="font-size:0.82rem;color:var(--text-2);"><strong>Summary:</strong> ${Models.escapeHtml(p.summary)}</div>` : '',
+        p.description ? `<div class="worklog-detail" style="font-size:0.82rem;margin-top:4px;">${Models.escapeHtml(p.description.slice(0, 300))}${p.description.length > 300 ? '…' : ''}</div>` : ''
+      ].filter(Boolean).join('');
+    }
+    if (a.action_type === 'mark_criterion_done') {
+      return [
+        p.criterion ? `<div style="font-size:0.82rem;color:var(--text-2);"><strong>Criterion:</strong> ${Models.escapeHtml(p.criterion)}</div>` : '',
+        p.evidence  ? `<div class="worklog-detail" style="font-size:0.82rem;margin-top:4px;">${Models.escapeHtml(p.evidence.slice(0, 300))}${p.evidence.length > 300 ? '…' : ''}</div>` : ''
+      ].filter(Boolean).join('');
     }
     if (a.rationale) return `<span style="font-size:0.82rem;color:var(--text-2);">${Models.escapeHtml(a.rationale)}</span>`;
     return '';
@@ -685,7 +700,7 @@ Views.ProjectDetail = (() => {
     catch { if (section) section.style.display = 'none'; return; }
 
     const rows = (res && res.entries) || [];
-    const by = { goal: [], requirement: [], success_criteria: [], constraint: [], decision: [] };
+    const by = { goal: [], requirement: [], success_criteria: [], constraint: [], decision: [], success_criteria_met: [] };
     rows.forEach(r => { if (by[r.kind] !== undefined) by[r.kind].push((r.content || '').trim()); });
     const uniq = a => [...new Set(a.filter(Boolean))];
     const goal = by.goal[0] || '';                          // newest goal (rows are desc)
@@ -694,19 +709,30 @@ Views.ProjectDetail = (() => {
     const cons = uniq(by.constraint.slice().reverse());
     const decs = uniq(by.decision.slice().reverse());
 
+    // Build a set of met criterion texts (match by lowercased prefix for fuzzy matching)
+    const metSet = new Set(by.success_criteria_met.map(m => m.split('\n\nEvidence:')[0].trim().toLowerCase()));
+
     if (!goal && !crit.length && !decs.length) { if (section) section.style.display = 'none'; return; }
 
     const block = (label, arr, ordered) => {
+      if (!arr.length) return '';
+      const tag = ordered ? 'ol' : 'ul';
+      return `<div class="spec-block"><div class="spec-label">${label}</div><${tag} class="spec-list">${arr.map(x => {
+        const isMet = metSet.has(x.toLowerCase());
+        return `<li${isMet ? ' class="criterion-met"' : ''}>${isMet ? '✓ ' : ''}${Models.escapeHtml(x)}</li>`;
+      }).join('')}</${tag}></div>`;
+    };
+    const blockPlain = (label, arr, ordered) => {
       if (!arr.length) return '';
       const tag = ordered ? 'ol' : 'ul';
       return `<div class="spec-block"><div class="spec-label">${label}</div><${tag} class="spec-list">${arr.map(x => `<li>${Models.escapeHtml(x)}</li>`).join('')}</${tag}></div>`;
     };
     body.innerHTML =
       (goal ? `<div class="spec-block"><div class="spec-label">Goal</div><div class="spec-goal">${Models.escapeHtml(goal)}</div></div>` : '') +
-      block('Requirements', reqs, false) +
+      blockPlain('Requirements', reqs, false) +
       block('Success criteria', crit, true) +
-      block('Constraints', cons, false) +
-      block('Decisions', decs, false);
+      blockPlain('Constraints', cons, false) +
+      blockPlain('Decisions', decs, false);
     if (section) section.style.display = '';
   }
 

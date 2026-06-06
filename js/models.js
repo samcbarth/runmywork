@@ -17,6 +17,7 @@ const Models = (() => {
       snoozedUntil: null,
       links: [],
       tasks: [],
+      summary: data.summary || '',
       aiSuggestion: null,
       aiRequested: false
     };

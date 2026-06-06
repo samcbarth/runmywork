@@ -110,6 +110,7 @@ Views.Dashboard = (() => {
         </div>
         <h3 class="card-title" onclick="App.navigate('project/${project.id}')">${Models.escapeHtml(project.title)}</h3>
         ${detail}
+        ${(() => { const s = project.summary || (project.description ? project.description.slice(0, 100) + (project.description.length > 100 ? '…' : '') : ''); return s ? `<p class="card-summary">${Models.escapeHtml(s)}</p>` : ''; })()}
         ${tags}
         <div class="card-footer">
           <span class="time-invested">⏱ ${invested}</span>

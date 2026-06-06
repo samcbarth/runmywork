@@ -52,8 +52,22 @@ function buildPayload(action, args) {
         constraints:     list(args.constraints)
       };
     }
+    case 'update_description': {
+      const description = String(args.description || '').trim();
+      const summary     = String(args.summary || '').trim();
+      if (!description && !summary) throw new Error('update_description needs description and/or summary');
+      return { description: description.slice(0, 2000), summary: summary.slice(0, 200) };
+    }
+    case 'mark_criterion_done': {
+      const criterion = String(args.criterion || '').trim();
+      if (!criterion) throw new Error('mark_criterion_done needs a criterion string');
+      return {
+        criterion: criterion.slice(0, 400),
+        evidence:  String(args.evidence || '').trim().slice(0, 800)
+      };
+    }
     default:
-      throw new Error(`unknown action "${action}". Use add_tasks | set_status | set_priority | add_link | set_spec`);
+      throw new Error(`unknown action "${action}". Use add_tasks | set_status | set_priority | add_link | set_spec | update_description | mark_criterion_done`);
   }
 }
 
@@ -65,19 +79,21 @@ function alreadyPending(pending, action, payload) {
     if (action === 'set_status') return p.status === payload.status;
     if (action === 'set_priority') return p.priority === payload.priority;
     if (action === 'add_link') return p.url === payload.url;
-    if (action === 'add_tasks') return true;   // one pending add_tasks batch is enough
-    if (action === 'set_spec') return true;    // one pending spec proposal is enough
+    if (action === 'add_tasks') return true;          // one pending add_tasks batch is enough
+    if (action === 'set_spec') return true;           // one pending spec proposal is enough
+    if (action === 'update_description') return true; // one pending description update at a time
+    if (action === 'mark_criterion_done') return p.criterion === payload.criterion; // dedupe by criterion text
     return false;
   });
 }
 
 module.exports = {
   name: 'propose',
-  description: 'Propose a change to the project that the human approves in the app. This is the ONLY way to change tracked state. action is one of: add_tasks (args.tasks: string[]), set_status (args.status: active|blocked|idle|done), set_priority (args.priority: low|medium|high), add_link (args.url, args.label), set_spec (args.goal, args.requirements[], args.successCriteria[], args.constraints[] — defines the project goal + measurable success criteria). Always include a clear rationale.',
+  description: 'Propose a change to the project that the human approves in the app. This is the ONLY way to change tracked state. action is one of: add_tasks (args.tasks: string[]), set_status (args.status: active|blocked|idle|done), set_priority (args.priority: low|medium|high), add_link (args.url, args.label), set_spec (args.goal, args.requirements[], args.successCriteria[], args.constraints[] — defines the project goal + measurable success criteria), update_description (args.description: full description, args.summary: 1-2 sentence tagline for cards — updates how the project describes itself), mark_criterion_done (args.criterion: exact criterion text, args.evidence: what you did to meet it — file a completion claim for a success criterion). Always include a clear rationale.',
   parameters: {
     type: 'object',
     properties: {
-      action: { type: 'string', enum: ['add_tasks', 'set_status', 'set_priority', 'add_link', 'set_spec'] },
+      action: { type: 'string', enum: ['add_tasks', 'set_status', 'set_priority', 'add_link', 'set_spec', 'update_description', 'mark_criterion_done'] },
       rationale: { type: 'string', description: 'Why this change — shown to the human in the approval.' },
       tasks: { type: 'array', items: { type: 'string' }, description: 'For add_tasks.' },
       status: { type: 'string', description: 'For set_status.' },
@@ -89,6 +105,10 @@ module.exports = {
       requirements: { type: 'array', items: { type: 'string' }, description: 'For set_spec: key requirements.' },
       successCriteria: { type: 'array', items: { type: 'string' }, description: 'For set_spec: 3-6 measurable, checkable success criteria.' },
       constraints: { type: 'array', items: { type: 'string' }, description: 'For set_spec: constraints/boundaries.' },
+      description: { type: 'string', description: 'For update_description: full project description (up to 2000 chars).' },
+      summary: { type: 'string', description: 'For update_description: 1-2 sentence tagline shown on cards (up to 200 chars).' },
+      criterion: { type: 'string', description: 'For mark_criterion_done: exact text of the success criterion being claimed done.' },
+      evidence: { type: 'string', description: 'For mark_criterion_done: what was done/found to meet this criterion.' },
       project_id: { type: 'string', description: 'Board-planner mode only: which project to target. Omit when working a single project.' }
     },
     required: ['action', 'rationale']
@@ -129,6 +149,8 @@ module.exports = {
       : action === 'set_status' ? `status → ${payload.status}`
       : action === 'set_priority' ? `priority → ${payload.priority}`
       : action === 'set_spec' ? `spec (${payload.successCriteria.length} criteria)`
+      : action === 'update_description' ? `update description/summary`
+      : action === 'mark_criterion_done' ? `criterion done: "${(payload.criterion || '').slice(0, 50)}"`
       : `link ${payload.label}`;
     ctx.proposals.push(desc);
     return { ok: true, proposed: desc, note: 'Filed for human approval in the app inbox.' };

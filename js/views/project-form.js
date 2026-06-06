@@ -11,8 +11,15 @@ Views.ProjectForm = (() => {
       </div>
 
       <div class="form-group">
-        <label class="form-label" for="pf-desc">Description <span class="optional">(optional)</span></label>
-        <textarea class="form-textarea" id="pf-desc" placeholder="What's this about?">${Models.escapeHtml(project ? project.description : '')}</textarea>
+        <label class="form-label" for="pf-summary">Short summary <span class="optional">(1-2 sentences, shown on cards)</span></label>
+        <input class="form-input" id="pf-summary" type="text" maxlength="200"
+          placeholder="e.g. Automates weekly reports so the team spends less time on admin"
+          value="${Models.escapeHtml(project ? (project.summary || '') : '')}">
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="pf-desc">Full description <span class="optional">(optional)</span></label>
+        <textarea class="form-textarea" id="pf-desc" placeholder="Background, context, and details…">${Models.escapeHtml(project ? project.description : '')}</textarea>
       </div>
 
       <div class="form-row">
@@ -93,6 +100,7 @@ Views.ProjectForm = (() => {
 
     const status   = document.getElementById('pf-status').value;
     const priority = document.getElementById('pf-priority').value;
+    const summary  = document.getElementById('pf-summary').value.trim();
     const desc     = document.getElementById('pf-desc').value.trim();
     const tagStr   = document.getElementById('pf-tags').value;
     const note     = document.getElementById('pf-note').value.trim();
@@ -103,6 +111,7 @@ Views.ProjectForm = (() => {
     if (existing) {
       const prevStatus = existing.status;
       existing.title       = title;
+      existing.summary     = summary;
       existing.description = desc;
       existing.priority    = priority;
       existing.tags        = tags;
@@ -118,7 +127,7 @@ Views.ProjectForm = (() => {
         Notifications.ping(title, blocked ? `Blocked — ${blocked}` : 'Marked as blocked', 'high');
       }
     } else {
-      const project = Models.createProject({ title, description: desc, status, priority, tags, note, blockedReason: blocked });
+      const project = Models.createProject({ title, summary, description: desc, status, priority, tags, note, blockedReason: blocked });
       Store.saveProject(project);
       if (status === 'blocked') {
         Notifications.ping(title, blocked ? `Blocked — ${blocked}` : 'Marked as blocked', 'high');

@@ -8,8 +8,10 @@ Views.Approvals = (() => {
       case 'set_status':   return `Set status → ${p.status}`;
       case 'set_priority': return `Set priority → ${p.priority}`;
       case 'add_link':     return `Add link: ${p.label || p.url || ''}`;
-      case 'set_spec':     return `Set project spec (${Array.isArray(p.successCriteria) ? p.successCriteria.length : 0} success criteria)`;
-      default:             return a.action_type;
+      case 'set_spec':            return `Set project spec (${Array.isArray(p.successCriteria) ? p.successCriteria.length : 0} success criteria)`;
+      case 'update_description':  return 'Update project description & summary';
+      case 'mark_criterion_done': return `Criterion done: "${(p.criterion || '').slice(0, 60)}"`;
+      default:                    return a.action_type;
     }
   }
 
@@ -21,6 +23,18 @@ Views.Approvals = (() => {
     }
     if (a.action_type === 'set_status' && p.note) {
       return `<p class="approval-detail-note">${Models.escapeHtml(p.note)}</p>`;
+    }
+    if (a.action_type === 'update_description') {
+      return [
+        p.summary ? `<p class="approval-detail-note"><strong>Summary:</strong> ${Models.escapeHtml(p.summary)}</p>` : '',
+        p.description ? `<div class="approval-detail-note"><strong>Description:</strong><div class="worklog-detail" style="margin-top:4px;">${Models.escapeHtml(p.description)}</div></div>` : ''
+      ].filter(Boolean).join('');
+    }
+    if (a.action_type === 'mark_criterion_done') {
+      return [
+        p.criterion ? `<p class="approval-detail-note"><strong>Criterion:</strong> ${Models.escapeHtml(p.criterion)}</p>` : '',
+        p.evidence  ? `<div class="approval-detail-note"><strong>Evidence:</strong><div class="worklog-detail" style="margin-top:4px;">${Models.escapeHtml(p.evidence)}</div></div>` : ''
+      ].filter(Boolean).join('');
     }
     if (a.action_type === 'set_spec') {
       const sec = (label, arr, ordered) => {
@@ -137,6 +151,25 @@ Views.Approvals = (() => {
         });
         return true;   // context rows are written directly; no project mutation
       }
+      case 'update_description':
+        if (p.description) project.description = p.description;
+        if (p.summary)     project.summary     = p.summary;
+        break;
+      case 'mark_criterion_done': {
+        if (!p.criterion) return false;
+        Sync.addContext({
+          project_id: a.project_id,
+          kind: 'success_criteria_met',
+          content: p.criterion + (p.evidence ? `\n\nEvidence: ${p.evidence}` : ''),
+          created_by: 'agent-approved'
+        });
+        Sync.addWorklog({
+          project_id: a.project_id, kind: 'action', created_by: 'user',
+          summary: `Criterion confirmed: "${p.criterion.slice(0, 80)}"`,
+          detail: { criterion: p.criterion, evidence: p.evidence }
+        });
+        return true;   // context rows written directly; no project mutation
+      }
       default:
         return false;
     }
@@ -167,6 +200,15 @@ Views.Approvals = (() => {
         project_id: a.project_id, kind: 'note', created_by: 'user',
         summary: `Rejected: ${_summary(a)}`, detail: { action_type: a.action_type }
       });
+      if (a.action_type === 'mark_criterion_done') {
+        const criterion = (a.payload || {}).criterion || '';
+        Sync.addContext({
+          project_id: a.project_id,
+          kind: 'note',
+          content: `[REJECTED] Criterion not yet sufficiently met: "${criterion.slice(0, 200)}". User rejected the completion claim. Gather stronger evidence or complete more work before proposing again.`,
+          created_by: 'user'
+        });
+      }
     }
     await Sync.decideApproval(id, 'rejected');
     updateBadge();
@@ -194,6 +236,20 @@ Views.Approvals = (() => {
     return toApply.length;
   }
 
+  /* Fire a browser notification when a mark_criterion_done proposal is pending. */
+  function notifyCriterionReview() {
+    const settings = Store.getSettings();
+    if (!settings.notificationsEnabled || Notification.permission !== 'granted') return;
+    const criterionProposals = Store.getApprovals().filter(a => a.action_type === 'mark_criterion_done');
+    if (!criterionProposals.length) return;
+    const a = criterionProposals[0];
+    const project = Store.getProject(a.project_id);
+    new Notification('RunMyWork — Criterion ready for review', {
+      body: `${project ? project.title : 'A project'}: "${((a.payload || {}).criterion || '').slice(0, 80)}"`,
+      tag: 'rmw-criterion'
+    });
+  }
+
   /* Sync the header badge with the pending count. Safe to call from anywhere. */
   function updateBadge() {
     const badge = document.getElementById('approvals-badge');
@@ -207,5 +263,5 @@ Views.Approvals = (() => {
     }
   }
 
-  return { render, approve, reject, updateBadge, autoApplyPending };
+  return { render, approve, reject, updateBadge, autoApplyPending, notifyCriterionReview };
 })();
