@@ -1,6 +1,6 @@
 const App = (() => {
   // Bumped on each deploy so you can confirm which build is live (shown in Settings).
-  const BUILD = '2026-06-06 · auto-trigger on open';
+  const BUILD = '2026-06-06 · agent cooldown UI + tool_call fix';
 
   let _timerInterval = null;
   let _swRegistration = null;
@@ -186,6 +186,37 @@ const App = (() => {
     location.replace(location.pathname + '?u=' + Date.now() + location.hash);
   }
 
+  // Format ms → "Xm Ys" / "Ys" for the cooldown readout.
+  function _fmtCooldown(ms) {
+    const total = Math.ceil(ms / 1000);
+    const m = Math.floor(total / 60);
+    const s = total % 60;
+    return m > 0 ? `${m}m ${s}s` : `${s}s`;
+  }
+
+  // Bottom pill showing what the agent trigger did on this open.
+  function showAgentStatus(result) {
+    let el = document.getElementById('agent-status');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'agent-status';
+      el.style.cssText = 'position:fixed;bottom:54px;left:50%;transform:translateX(-50%);background:var(--surface);border:1px solid var(--border);border-radius:999px;padding:6px 14px;font-size:0.78rem;color:var(--text-2);z-index:500;box-shadow:0 2px 8px rgba(0,0,0,0.15);transition:opacity 0.3s;pointer-events:none;max-width:90vw;text-align:center;';
+      document.body.appendChild(el);
+    }
+    if (result && result.triggered) {
+      el.textContent = '🤖 Agent run triggered';
+      el.style.color = 'var(--c-active)';
+    } else if (result && result.remainingMs > 0) {
+      el.textContent = `🤖 Agent on cooldown — next run in ${_fmtCooldown(result.remainingMs)}`;
+      el.style.color = 'var(--text-2)';
+    } else {
+      el.textContent = '🤖 Agent trigger unavailable';
+      el.style.color = 'var(--c-idle)';
+    }
+    el.style.opacity = '1';
+    setTimeout(() => { el.style.opacity = '0'; }, 5000);
+  }
+
   function getBuild() { return BUILD; }
 
   /* ── Init ── */
@@ -207,12 +238,12 @@ const App = (() => {
     Views.Approvals.updateBadge();
     Views.Approvals.autoApplyPending();          // silently apply any auto-approve policies
     Views.Approvals.notifyCriterionReview();     // notify if criterion proposals are pending
-    Sync.triggerAgent();                         // kick off a GitHub Actions run (20-min cooldown)
+    Sync.triggerAgent().then(showAgentStatus);   // kick off a GitHub Actions run (20-min cooldown)
 
     _handleRoute();
   }
 
   document.addEventListener('DOMContentLoaded', init);
 
-  return { navigate, refresh, openModal, openModalFull, closeModal, startGlobalTimer, stopGlobalTimer, syncPush, syncPushProject, checkForUpdate, getBuild };
+  return { navigate, refresh, openModal, openModalFull, closeModal, startGlobalTimer, stopGlobalTimer, syncPush, syncPushProject, checkForUpdate, getBuild, showAgentStatus };
 })();

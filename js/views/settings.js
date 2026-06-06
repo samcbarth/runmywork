@@ -74,6 +74,22 @@ Views.Settings = (() => {
         <button class="btn btn-primary" id="save-aa-btn" style="margin-top:12px;">Save</button>
       </div>
 
+      <!-- ── Agent runtime ── -->
+      <div class="settings-section">
+        <div class="settings-section-title">Agent runtime</div>
+        <p style="font-size:0.82rem;color:var(--text-2);line-height:1.6;margin-bottom:12px;">
+          Opening the app triggers a cloud agent run (GitHub Actions). A 20-minute cooldown
+          stops repeated opens from queuing duplicate runs.
+        </p>
+        <div class="setting-row">
+          <div class="setting-info">
+            <div class="setting-label">Trigger status</div>
+            <div class="setting-desc" id="agent-cooldown-readout">…</div>
+          </div>
+          <button class="btn btn-sm btn-primary" id="run-agent-now-btn">Run now</button>
+        </div>
+      </div>
+
       <!-- ── Data ── -->
       <div class="settings-section">
         <div class="settings-section-title">Data</div>
@@ -135,6 +151,48 @@ Views.Settings = (() => {
       updateBtn.disabled = true;
       App.checkForUpdate();
     });
+
+    _startCooldownTicker();
+    const runNowBtn = document.getElementById('run-agent-now-btn');
+    if (runNowBtn) runNowBtn.addEventListener('click', async () => {
+      runNowBtn.disabled = true;
+      runNowBtn.textContent = 'Triggering…';
+      const res = await Sync.triggerAgent({ force: true });
+      App.showAgentStatus(res);
+      runNowBtn.textContent = res.triggered ? 'Triggered ✓' : 'Failed';
+      _renderCooldown();
+      setTimeout(() => { runNowBtn.disabled = false; runNowBtn.textContent = 'Run now'; }, 2500);
+    });
+  }
+
+  let _cooldownTimer = null;
+  function _fmtCooldown(ms) {
+    const total = Math.ceil(ms / 1000);
+    const m = Math.floor(total / 60);
+    const s = total % 60;
+    return m > 0 ? `${m}m ${s}s` : `${s}s`;
+  }
+  function _renderCooldown() {
+    const el = document.getElementById('agent-cooldown-readout');
+    if (!el) { if (_cooldownTimer) { clearInterval(_cooldownTimer); _cooldownTimer = null; } return; }
+    const remaining = Sync.triggerCooldownRemaining();
+    const last = Sync.triggerLastAt();
+    if (remaining > 0) {
+      el.innerHTML = `⏳ Cooldown — next run in <strong>${_fmtCooldown(remaining)}</strong>`;
+    } else {
+      el.innerHTML = last
+        ? '✅ Ready — opening the app will trigger a run'
+        : '✅ Ready — never triggered on this device yet';
+    }
+  }
+  function _startCooldownTicker() {
+    _renderCooldown();
+    if (_cooldownTimer) clearInterval(_cooldownTimer);
+    _cooldownTimer = setInterval(() => {
+      // self-cancel if we navigated away from settings
+      if (!document.getElementById('agent-cooldown-readout')) { clearInterval(_cooldownTimer); _cooldownTimer = null; return; }
+      _renderCooldown();
+    }, 1000);
   }
 
   function _saveNotifSettings() {

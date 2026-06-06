@@ -541,23 +541,38 @@ const Sync = (() => {
   // 20-minute client-side cooldown prevents hammering on every page refresh.
   const _TRIGGER_KEY = 'rmw_last_trigger';
   const _TRIGGER_COOLDOWN = 20 * 60 * 1000;
-  async function triggerAgent() {
-    if (!isConfigured()) return;
+
+  // ms until the cooldown clears (0 = ready to trigger now).
+  function triggerCooldownRemaining() {
     const last = parseInt(localStorage.getItem(_TRIGGER_KEY) || '0', 10);
-    if (Date.now() - last < _TRIGGER_COOLDOWN) return;
+    return Math.max(0, _TRIGGER_COOLDOWN - (Date.now() - last));
+  }
+  function triggerLastAt() {
+    return parseInt(localStorage.getItem(_TRIGGER_KEY) || '0', 10);
+  }
+
+  // Returns { triggered, remainingMs }. Pass { force: true } to bypass the cooldown.
+  async function triggerAgent(opts = {}) {
+    if (!isConfigured()) return { triggered: false, remainingMs: 0 };
+    const remaining = triggerCooldownRemaining();
+    if (remaining > 0 && !opts.force) return { triggered: false, remainingMs: remaining };
     localStorage.setItem(_TRIGGER_KEY, String(Date.now()));
     try {
-      fetch(`${SUPABASE_URL}/functions/v1/trigger-agent`, {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/trigger-agent`, {
         method: 'POST',
         headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` }
       });
-    } catch { /* silent — agent trigger is best-effort */ }
+      return { triggered: res.ok, remainingMs: 0, status: res.status };
+    } catch (e) {
+      return { triggered: false, remainingMs: 0, error: e.message };
+    }
   }
 
   return {
     pull, push, pushProject, remove,
     pullApprovals, decideApproval, addWorklog, pullWorklog,
     pullContext, addContext, pullLatestRun, pullErrorLog,
-    isConfigured, rowToProject, projectToRow, triggerAgent
+    isConfigured, rowToProject, projectToRow,
+    triggerAgent, triggerCooldownRemaining, triggerLastAt
   };
 })();
