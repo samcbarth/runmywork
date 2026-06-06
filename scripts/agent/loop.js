@@ -247,6 +247,8 @@ async function runLoop(opts) {
         const n = (callCounts.get(sig) || 0) + 1;
         callCounts.set(sig, n);
         if (n >= 5) {
+          // Push a synthetic tool response before breaking so message history stays valid.
+          messages.push({ role: 'tool', content: JSON.stringify({ error: 'repetition stall — aborting' }), tool_name: name });
           if (depth === 0) {
             await sb.logError({
               projectId: project && project.id, runId: ctx.run && ctx.run.id,
@@ -258,8 +260,10 @@ async function runLoop(opts) {
           break;
         }
         if (n === 3) {
+          // Push a synthetic tool response FIRST — OpenAI requires every tool_call_id
+          // to have a matching tool message before the next user/assistant turn.
+          messages.push({ role: 'tool', content: JSON.stringify({ skipped: true, note: 'identical call repeated — try a different approach' }), tool_name: name });
           messages.push({ role: 'user', content: `You've called ${name} with the same arguments 3 times and it isn't working. Stop repeating it — try a different approach, a different tool, or call done.` });
-          // skip dispatching the 3rd identical call; let the model rethink
           continue;
         }
       }
