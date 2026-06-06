@@ -25,7 +25,7 @@
 const { loadConfig, validate } = require('./config');
 const { makeSupabase } = require('./supabase');
 const { makeOllama } = require('./ollama');
-const { makeGroq, makeOpenRouter, makeOpenAI } = require('./groq');
+const { makeGroq, makeOpenRouter, makeOpenAI, makeChainedProvider } = require('./groq');
 const { runLoop } = require('./loop');
 
 function parseArgs(argv) {
@@ -44,12 +44,6 @@ function parseArgs(argv) {
     else a._.push(t);
   }
   return a;
-}
-
-// Decide whether a goal requires cloud (code edits, git) or can run local (research, proposals).
-function goalNeedsCloud(goal) {
-  if (!goal) return false;
-  return /edit|patch|write|fix|refactor|commit|implement|add.*feature|update.*file|change.*code/i.test(goal);
 }
 
 function log(...args) { console.log('[agent]', ...args); }
@@ -129,10 +123,11 @@ async function runForProject(services, project, goalOverride, budgetOverride) {
   const contextText = await buildMemory(sb, project.id);
 
   // Inject real file tree so the model never guesses paths.
-  // Groq free tier has a tight TPM limit — use a shallow (1-level) tree to save tokens.
+  // Cloud free tiers have tight token/day limits — use a shallow (1-level) tree to save tokens.
   let fileTree = '';
   if (services.config.projectRoot) {
-    const depth = services.config.groqKey ? 1 : 2;
+    const anyCloud = services.config.groqKey || services.config.openRouterKey || services.config.openAIKey;
+    const depth = anyCloud ? 1 : 2;
     try { fileTree = buildFileTree(services.config.projectRoot, depth); } catch { /* best effort */ }
   }
 
@@ -166,28 +161,6 @@ async function runForProject(services, project, goalOverride, budgetOverride) {
   log(`   ✓ ${result.steps} steps · proposed: ${result.proposals.join(', ') || 'none'} · artifacts: ${result.artifacts.length}${filesChanged.length ? ` · changed: ${filesChanged.map(f => f.path).join(', ')}` : ''}`);
   log(`   ${result.summary.slice(0, 240)}`);
   return result;
-}
-
-// Wrap runForProject with automatic provider fallback.
-// If the primary provider (Groq/OpenRouter) errors on the first step (rate-limit,
-// tool-format rejection) and an OpenAI key is available, retry on gpt-4o-mini.
-async function runForProjectWithFallback(services, project, goalOverride, budgetOverride) {
-  try {
-    return await runForProject(services, project, goalOverride, budgetOverride);
-  } catch (e) {
-    const isPrimaryFree = services.ollama.host !== 'api.openai.com';
-    const hasOpenAI = services.config.openAIKey;
-    if (isPrimaryFree && hasOpenAI) {
-      log(`   ⚡ ${services.ollama.host} failed (${e.message.slice(0,60)}) — falling back to openai:gpt-4o-mini`);
-      const fallbackServices = {
-        ...services,
-        ollama: makeOpenAI(services.config)
-      };
-      fallbackServices.config = { ...services.config, plannerModel: services.config.openAIModel, workerModel: services.config.openAIModel };
-      return await runForProject(fallbackServices, project, goalOverride, budgetOverride);
-    }
-    throw e;
-  }
 }
 
 // Phase 3: one loop that sees the whole board and decides where effort should go,
@@ -239,33 +212,29 @@ async function main() {
   }
 
   const sb = makeSupabase(config);
-  // Provider priority (free-first):
-  //   1. Groq          — free, llama-3.3-70b, 131k TPM / 6k req day
-  //   2. OpenRouter    — free model tier (llama-3.3-70b:free), rate-limited
+  // Build the provider CHAIN (free-first, falls over mid-run on failure):
+  //   1. Groq          — free, llama-3.3-70b (~100k tokens/DAY limit)
+  //   2. OpenRouter    — free model tier, rate-limited
   //   3. OpenAI        — paid fallback (~$0.005/run), only when free exhausted
-  //   4. Ollama local  — always available, --local forces this
+  //   4. Ollama local  — final fallback, always available
   //
-  // --local  → always Ollama regardless of cloud keys
-  // --cloud  → skip Groq/OpenRouter, go straight to OpenAI
-
-  let ollama, provider;
+  // --local  → Ollama only
+  // --cloud  → skip free tier, OpenAI → Ollama
+  const chain = [];
   if (config.forceLocal) {
-    ollama = makeOllama(config); provider = null;
-  } else if (config.forceCloud && config.openAIKey) {
-    ollama = makeOpenAI(config); provider = `openai:${config.openAIModel}`;
-    config.plannerModel = config.openAIModel; config.workerModel = config.openAIModel;
-  } else if (config.groqKey) {
-    ollama = makeGroq(config); provider = `groq:${config.groqModel}`;
-    config.plannerModel = config.groqModel; config.workerModel = config.groqModel;
-  } else if (config.openRouterKey) {
-    ollama = makeOpenRouter(config); provider = `openrouter:${config.openRouterModel}`;
-    config.plannerModel = config.openRouterModel; config.workerModel = config.openRouterModel;
-  } else if (config.openAIKey) {
-    ollama = makeOpenAI(config); provider = `openai:${config.openAIModel}`;
-    config.plannerModel = config.openAIModel; config.workerModel = config.openAIModel;
+    chain.push({ label: 'ollama', impl: makeOllama(config) });
+  } else if (config.forceCloud) {
+    if (config.openAIKey)     chain.push({ label: `openai:${config.openAIModel}`, impl: makeOpenAI(config) });
+    chain.push({ label: 'ollama', impl: makeOllama(config) });
   } else {
-    ollama = makeOllama(config); provider = null;
+    if (config.groqKey)       chain.push({ label: `groq:${config.groqModel}`,           impl: makeGroq(config) });
+    if (config.openRouterKey) chain.push({ label: `openrouter:${config.openRouterModel}`, impl: makeOpenRouter(config) });
+    if (config.openAIKey)     chain.push({ label: `openai:${config.openAIModel}`,        impl: makeOpenAI(config) });
+    chain.push({ label: 'ollama', impl: makeOllama(config) });
   }
+
+  const ollama   = chain.length > 1 ? makeChainedProvider(chain, log) : chain[0].impl;
+  const provider = chain.length > 1 ? chain.map(c => c.label).join(' → ') : null;
   const services = { sb, ollama, config, log, runLoop };
 
   // fail fast & clear if either dependency is down
@@ -322,7 +291,7 @@ async function main() {
 
   for (const project of targets) {
     try {
-      await runForProjectWithFallback(services, project, args.project ? args.goal : undefined, args.budget);
+      await runForProject(services, project, args.project ? args.goal : undefined, args.budget);
     } catch (e) {
       log(`   ✗ ${project.title} failed: ${e.message}`);
     }

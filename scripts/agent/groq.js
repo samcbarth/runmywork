@@ -357,4 +357,77 @@ function makeOpenAI(config) {
   return { chat, reachable, listModels, host: 'api.openai.com', model: MODEL };
 }
 
-module.exports = { makeGroq, makeOpenRouter, makeOpenAI };
+/*
+ * Chained provider — tries each provider in order, falls over on failure.
+ * ----------------------------------------------------------------------
+ * providers: [{ label, impl }]  (impl = makeGroq/makeOpenRouter/makeOpenAI/makeOllama result)
+ *
+ * On chat():
+ *   • Try the first non-dead provider.
+ *   • On a DAILY rate limit / auth / quota error → mark that provider DEAD for the
+ *     rest of the process (don't waste calls retrying it every step).
+ *   • On any other error → try the next provider this call, but keep it alive.
+ *   • This makes fallover work MID-RUN: if Groq dies on step 8, step 9 uses the next.
+ *
+ * Each impl uses ITS OWN default model — we strip opts.model so a Groq model name
+ * is never sent to OpenAI etc.
+ */
+function makeChainedProvider(providers, log) {
+  const dead = new Set();
+  let activeIdx = -1;
+  const announce = (i) => {
+    if (i !== activeIdx) {
+      activeIdx = i;
+      if (log) log(`   ↻ provider → ${providers[i].label}`);
+    }
+  };
+
+  // Mark a provider dead for the rest of this process run when it won't recover
+  // in time to matter: daily limits, auth/quota failures, AND any 429 (a rate
+  // limit won't clear within a short agent run, so stop wasting a call on it
+  // every step — fall straight to the next provider).
+  const isFatal = (msg) =>
+    /\b429\b|rate limit|per day|TPD|tokens per day|insufficient_quota|invalid_api_key|incorrect api key|401|403/i.test(msg);
+
+  async function chat(messages, tools, opts = {}) {
+    const cleanOpts = { ...opts };
+    delete cleanOpts.model;   // let each impl use its own default model
+    let lastErr;
+    for (let i = 0; i < providers.length; i++) {
+      if (dead.has(i)) continue;
+      try {
+        const r = await providers[i].impl.chat(messages, tools, cleanOpts);
+        announce(i);
+        return r;
+      } catch (e) {
+        lastErr = e;
+        if (isFatal(e.message)) {
+          dead.add(i);
+          if (log) log(`   ✗ ${providers[i].label} exhausted (${e.message.slice(0, 70)})`);
+        } else if (log) {
+          log(`   ⚠ ${providers[i].label} error, trying next (${e.message.slice(0, 70)})`);
+        }
+        // fall through to next provider
+      }
+    }
+    throw lastErr || new Error('all providers failed');
+  }
+
+  async function reachable() {
+    for (let i = 0; i < providers.length; i++) {
+      if (dead.has(i)) continue;
+      try { if (await providers[i].impl.reachable()) return true; } catch { /* next */ }
+    }
+    return false;
+  }
+
+  async function listModels() { return []; }   // suppress the Ollama "model not found" warning path
+
+  return {
+    chat, reachable, listModels,
+    host: providers.map(p => p.label).join('→'),
+    model: providers[0] ? providers[0].impl.model : ''
+  };
+}
+
+module.exports = { makeGroq, makeOpenRouter, makeOpenAI, makeChainedProvider };
