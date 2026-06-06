@@ -9,3 +9,6 @@ scripts/agent/.env
 
 node_modules/
 .DS_Store
+
+# Supabase CLI scratch
+supabase/.temp/
