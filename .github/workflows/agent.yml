@@ -1,0 +1,103 @@
+name: RunMyWork Agent
+
+# Runs the autonomous agent loop in the cloud. No PAT needed on any device —
+# GitHub automatically injects GITHUB_TOKEN with repo + PR write access.
+# Supabase and OpenAI keys live in GitHub repo secrets (Settings → Secrets → Actions).
+#
+# Manual trigger: Actions tab → RunMyWork Agent → Run workflow
+# Scheduled: every 3 hours (same cadence as the local Task Scheduler job)
+
+on:
+  schedule:
+    - cron: '0 */3 * * *'
+  workflow_dispatch:
+    inputs:
+      project_id:
+        description: 'Project ID to target (blank = auto-pick)'
+        required: false
+        default: ''
+      goal:
+        description: 'Goal override (e.g. "Draft the launch checklist")'
+        required: false
+        default: ''
+      mode:
+        description: 'Run mode'
+        required: false
+        default: 'auto'
+        type: choice
+        options:
+          - auto    # pick projects that need it
+          - all     # sweep every open project
+          - plan    # board planner — pick focus across all projects
+          - force   # ignore the "needs it" filter
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  agent:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Configure git user
+        run: |
+          git config user.name "RunMyWork Agent"
+          git config user.email "agent@runmywork.local"
+
+      # Each run works on its own branch so changes don't go to main unreviewed.
+      - name: Create agent branch
+        id: branch
+        run: |
+          BRANCH="agent/run-$(date -u +%Y%m%d-%H%M%S)"
+          git checkout -b "$BRANCH"
+          echo "name=$BRANCH" >> "$GITHUB_OUTPUT"
+
+      # Build CLI flags from workflow_dispatch inputs (all optional).
+      - name: Build run flags
+        id: flags
+        run: |
+          FLAGS=""
+          [ -n "${{ inputs.project_id }}" ] && FLAGS="$FLAGS --project ${{ inputs.project_id }}"
+          [ -n "${{ inputs.goal }}" ]        && FLAGS="$FLAGS --goal '${{ inputs.goal }}'"
+          [ "${{ inputs.mode }}" = "all" ]   && FLAGS="$FLAGS --all"
+          [ "${{ inputs.mode }}" = "plan" ]  && FLAGS="$FLAGS --plan"
+          [ "${{ inputs.mode }}" = "force" ] && FLAGS="$FLAGS --force"
+          echo "flags=$FLAGS" >> "$GITHUB_OUTPUT"
+
+      - name: Run agent
+        env:
+          SUPABASE_URL:              https://tmqffprfhavzbaycvxej.supabase.co
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          OPENAI_API_KEY:            ${{ secrets.OPENAI_API_KEY }}
+          GITHUB_TOKEN:              ${{ secrets.GITHUB_TOKEN }}
+          AGENT_PROJECT_ROOT:        ${{ github.workspace }}
+          AGENT_ALLOW_FILE_WRITE:    '1'
+          AGENT_ALLOW_GIT_WRITE:     '1'
+          AGENT_ALLOW_GIT_PUSH:      '0'   # workflow handles the push below
+        run: node scripts/agent/run.js ${{ steps.flags.outputs.flags }}
+
+      # If the agent committed anything, push the branch and open a PR.
+      # Merging that PR triggers deploy.yml → GitHub Pages auto-updates.
+      - name: Push and open PR if commits were made
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          COMMITS=$(git rev-list --count origin/main..HEAD 2>/dev/null || echo 0)
+          echo "New commits since main: $COMMITS"
+          if [ "$COMMITS" -gt 0 ]; then
+            git push origin "${{ steps.branch.outputs.name }}"
+            gh pr create \
+              --title "Agent: $(date -u +'%Y-%m-%d %H:%M UTC')" \
+              --body "Automated changes from RunMyWork agent run. Review and merge to deploy." \
+              --base main \
+              --head "${{ steps.branch.outputs.name }}"
+          else
+            echo "No commits — nothing to push."
+          fi

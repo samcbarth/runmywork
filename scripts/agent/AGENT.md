@@ -139,6 +139,27 @@ worker `llama3.2` (smaller/faster).
 **On-demand from the app:** tapping **"Ask the advisor"** sets `ai_requested`; the
 next run picks that project up first.
 
+## GitHub Actions (recommended — no PAT on device)
+
+`.github/workflows/agent.yml` runs the agent in the cloud on the same 3-hour
+schedule. GitHub automatically injects `GITHUB_TOKEN` so the `github` tool
+(create PR, list issues, etc.) works with no credentials on your machine.
+
+**One-time setup — add two repo secrets** (GitHub → repo Settings → Secrets → Actions):
+
+| Secret | Where to find it |
+| ------ | ---------------- |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase → Settings → API |
+| `OPENAI_API_KEY` | OpenAI dashboard |
+
+`GITHUB_TOKEN` is injected automatically — no action needed.
+
+**Manual trigger:** Actions tab → RunMyWork Agent → Run workflow. Inputs:
+`project_id`, `goal`, and `mode` (auto / all / plan / force).
+
+If the agent commits any file changes, the workflow pushes a branch and opens a
+PR automatically. Merging the PR triggers `deploy.yml` → GitHub Pages updates.
+
 ## Schedule it (Windows Task Scheduler)
 
 ```powershell

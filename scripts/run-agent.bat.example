@@ -23,9 +23,10 @@ REM set AGENT_MAX_PROJECTS=3     REM how many projects per scheduled run
 REM set AGENT_MAX_DEPTH=2        REM how deep delegation may nest
 REM set AGENT_FORCE=1            REM work every open project, ignore the "needs it" filter
 
-REM ── GitHub integration (optional) ──
-REM Fine-grained PAT scoped to the repos the agent should touch. Enables the
-REM "github" tool: create_pr, list_prs, list_issues, create_issue, list_commits.
+REM ── GitHub integration ──
+REM GitHub access (create_pr, list_prs, etc.) runs via GitHub Actions — no token
+REM needed here. See .github/workflows/agent.yml and AGENT.md for setup.
+REM Only set this if you want GitHub access on a local run (uncommon):
 REM set GITHUB_TOKEN=github_pat_REPLACE_ME
 
 REM ── Web search backend (keyless) ──
