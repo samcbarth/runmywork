@@ -37,6 +37,10 @@ Views.Settings = (() => {
         </div>
 
         <p style="font-size:0.8rem;color:var(--text-2);margin:8px 0 0;">Notifications are delivered natively by your browser — works on phone and desktop.</p>
+        <div class="setting-row">
+          <label for="blocked-days-input">Blocked Days:</label>
+          <input type="number" id="blocked-days-input" min="1" value="1" />
+        </div>
         <button class="btn btn-primary" id="save-notif-btn" style="margin-top:12px;">Save</button>
       </div>
 
