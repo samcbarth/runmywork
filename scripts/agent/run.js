@@ -180,7 +180,10 @@ async function runForProject(services, project, goalOverride, budgetOverride) {
     goal = `This project has no clear spec yet. Research it — read the project context, tasks, and any linked code or files — then call the propose tool with action "set_spec" to define: a one-sentence goal, the key requirements, and 3-6 measurable, checkable success criteria that mean the project is "done". Do this BEFORE any other work, and finish once the spec proposal is filed.`;
   } else if (spec.criteria.length) {
     const list = spec.criteria.map((c, i) => `  ${i + 1}. ${c}`).join('\n');
-    goal = `Advance this project toward its success criteria. Pick the next UNMET criterion and do real, concrete work toward it — research, draft, build a deliverable, edit code, or propose the change. In your done summary, state which criterion you advanced and whether it is now met.\nSuccess criteria:\n${list}`;
+    const descHint = (!project.summary && !project.description)
+      ? '\nAlso: this project has no summary or description yet. After researching the project, use propose with action "update_description" to set a one-sentence summary (shown on the card) and a fuller description.'
+      : '';
+    goal = `Advance this project toward its success criteria. Pick the next UNMET criterion and do real, concrete work toward it — research, draft, build a deliverable, edit code, or propose the change. In your done summary, state which criterion you advanced and whether it is now met.${descHint}\nSuccess criteria:\n${list}`;
   } else {
     const openTasks = (project.tasks || []).filter(t => !t.done).map(t => t.text);
     const focus = openTasks.length ? ` Prioritise the open tasks: ${openTasks.slice(0, 5).join('; ')}.` : '';

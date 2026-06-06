@@ -1,7 +1,8 @@
 Views.ProjectDetail = (() => {
   let _currentId = null;
   let _menuOpen = false;
-  let _runPollTimer = null;   // live agent-progress polling (cleared on navigate)
+  let _runPollTimer = null;     // live agent-progress polling (cleared on navigate)
+  let _discoveryTimer = null;   // slow poll to catch a run that starts after page load
 
   function render(id) {
     _currentId = id;
@@ -660,7 +661,12 @@ Views.ProjectDetail = (() => {
     const el = document.getElementById(`tracker-${projectId}`);
     if (!el) return;
     const { ok, run } = await Sync.pullLatestRun(projectId);
-    if (!ok || !run) { el.style.display = 'none'; return; }
+    if (!ok || !run) {
+      el.style.display = 'none';
+      _startDiscoveryPoll(projectId);   // pick up a run that starts after page load
+      return;
+    }
+    _stopDiscoveryPoll();
     el.innerHTML = _trackerHtml(run);
     el.style.display = '';
     if (run.status === 'running') _startRunPoll(projectId);
@@ -682,8 +688,32 @@ Views.ProjectDetail = (() => {
     }, 4000);
   }
 
+  // Slow poll (8s) for when no run exists at page load — catches a run that starts
+  // after the page renders. Switches to the fast poll once a run appears.
+  function _startDiscoveryPoll(projectId) {
+    _stopDiscoveryPoll();
+    _discoveryTimer = setInterval(async () => {
+      if (!location.hash.includes('project/' + projectId)) { _stopDiscoveryPoll(); return; }
+      const { ok, run } = await Sync.pullLatestRun(projectId);
+      if (ok && run) {
+        _stopDiscoveryPoll();
+        const el = document.getElementById(`tracker-${projectId}`);
+        if (el) {
+          el.innerHTML = _trackerHtml(run);
+          el.style.display = '';
+          if (run.status === 'running') _startRunPoll(projectId);
+        }
+      }
+    }, 8000);
+  }
+
+  function _stopDiscoveryPoll() {
+    if (_discoveryTimer) { clearInterval(_discoveryTimer); _discoveryTimer = null; }
+  }
+
   function _stopRunPoll() {
     if (_runPollTimer) { clearInterval(_runPollTimer); _runPollTimer = null; }
+    _stopDiscoveryPoll();
   }
 
   /* ── Project context / knowledge: load + save ── */

@@ -42,6 +42,7 @@ function makeSupabase(config) {
   function rowToProject(r) {
     return {
       id: r.id, title: r.title, description: r.description,
+      summary: r.summary || '',
       status: r.status, priority: r.priority, tags: r.tags || [],
       createdAt: r.created_at, updatedAt: r.updated_at,
       statusHistory: r.status_history || [],

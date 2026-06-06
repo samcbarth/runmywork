@@ -121,6 +121,7 @@ function buildUserPrompt(goal, project, contextText) {
   if (project) {
     lines.push(`PROJECT STATE`);
     lines.push(`Title: ${project.title}`);
+    if (project.summary) lines.push(`Summary: ${project.summary}`);
     if (project.description) lines.push(`Description: ${project.description}`);
     lines.push(`Status: ${project.status}  Priority: ${project.priority}`);
     if (project.tags?.length) lines.push(`Tags: ${project.tags.join(', ')}`);
