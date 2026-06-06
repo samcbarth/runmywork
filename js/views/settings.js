@@ -107,6 +107,8 @@ Views.Settings = (() => {
 
   function _saveNotifSettings() {
     const settings = Store.getSettings();
+    if (!settings.thresholds) settings.thresholds = {};
+    settings.thresholds.blockedDaysWarning = parseInt(document.getElementById('blocked-days-input').value, 10);
     const notifOn  = document.getElementById('notif-toggle')?.checked && Notification.permission === 'granted';
 
     settings.notificationsEnabled = notifOn;
