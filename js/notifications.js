@@ -69,6 +69,7 @@ const Notifications = (() => {
   }
 
   async function tryRegisterPeriodicSync(reg) {
+    console.log('periodic sync registration attempted');
     if (!('periodicSync' in reg)) return;
     try {
       const status = await navigator.permissions.query({ name: 'periodic-background-sync' });
