@@ -287,4 +287,74 @@ function makeOpenRouter(config) {
   return { chat, reachable, listModels, host: 'openrouter.ai', model: MODEL };
 }
 
-module.exports = { makeGroq, makeOpenRouter };
+// OpenAI — same OpenAI-compat format, api.openai.com
+function makeOpenAI(config) {
+  const KEY   = config.openAIKey;
+  const MODEL = config.openAIModel || 'gpt-4o-mini';
+  const OA_BASE = 'https://api.openai.com/v1';
+
+  async function _post(path, body, ms = 180000) {
+    const ctrl = new AbortController();
+    const tid  = setTimeout(() => ctrl.abort(), ms);
+    try {
+      const res = await fetch(`${OA_BASE}${path}`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: ctrl.signal
+      });
+      if (!res.ok) {
+        const txt = await res.text().catch(() => res.statusText);
+        throw new Error(`OpenAI ${path} → ${res.status} ${txt}`);
+      }
+      return res.json();
+    } finally { clearTimeout(tid); }
+  }
+
+  async function chat(messages, tools, opts = {}) {
+    const model = opts.model || MODEL;
+    const body = { model, messages: toOpenAI(messages), stream: false, temperature: 0.1 };
+    if (tools && tools.length) {
+      body.tools = sanitizeTools(tools);
+      body.tool_choice = 'auto';
+      body.parallel_tool_calls = false;
+    }
+    let data;
+    try { data = await _post('/chat/completions', body, opts.timeout ?? 180000); }
+    catch (e) {
+      const m = e.message.match(/try again in ([\d.]+)s/i);
+      if (m) {
+        await new Promise(r => setTimeout(r, Math.min(Math.ceil(parseFloat(m[1])) * 1000 + 1000, 60000)));
+        data = await _post('/chat/completions', body, opts.timeout ?? 180000);
+      } else { throw e; }
+    }
+    const msg = data.choices?.[0]?.message;
+    if (!msg) throw new Error('OpenAI returned no message in choices[0]');
+    const tool_calls = (msg.tool_calls || []).map(tc => ({
+      id: tc.id,
+      function: {
+        name: tc.function.name,
+        arguments: (() => {
+          if (typeof tc.function.arguments === 'object') return tc.function.arguments;
+          try { return JSON.parse(tc.function.arguments); } catch { return {}; }
+        })()
+      }
+    }));
+    return { content: msg.content || '', tool_calls };
+  }
+
+  async function reachable() {
+    try {
+      const res = await fetch(`${OA_BASE}/models`, {
+        headers: { Authorization: `Bearer ${KEY}` }, signal: AbortSignal.timeout(6000)
+      });
+      return res.ok;
+    } catch { return false; }
+  }
+
+  async function listModels() { return [MODEL]; }
+
+  return { chat, reachable, listModels, host: 'api.openai.com', model: MODEL };
+}
+
+module.exports = { makeGroq, makeOpenRouter, makeOpenAI };

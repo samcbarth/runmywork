@@ -37,7 +37,10 @@ function loadConfig() {
     allowGitWrite:  bool(process.env.AGENT_ALLOW_GIT_WRITE),
     allowGitPush:   bool(process.env.AGENT_ALLOW_GIT_PUSH),
 
-    // Cloud providers (optional). Priority: Groq → OpenRouter → Ollama.
+    // Cloud providers (optional). Priority: OpenAI → Groq → OpenRouter → Ollama.
+    // OpenAI: gpt-4o-mini ~$0.005/run, most reliable tool calling
+    openAIKey:        process.env.OPENAI_API_KEY || '',
+    openAIModel:      process.env.OPENAI_MODEL   || 'gpt-4o-mini',
     // Groq: 131k TPM free, fastest inference, llama-3.3-70b
     groqKey:          process.env.GROQ_API_KEY || '',
     groqModel:        process.env.GROQ_MODEL   || 'llama-3.3-70b-versatile',

@@ -25,7 +25,7 @@
 const { loadConfig, validate } = require('./config');
 const { makeSupabase } = require('./supabase');
 const { makeOllama } = require('./ollama');
-const { makeGroq, makeOpenRouter } = require('./groq');
+const { makeGroq, makeOpenRouter, makeOpenAI } = require('./groq');
 const { runLoop } = require('./loop');
 
 function parseArgs(argv) {
@@ -207,9 +207,14 @@ async function main() {
   }
 
   const sb = makeSupabase(config);
-  // Provider priority: Groq → OpenRouter → Ollama.
+  // Provider priority: OpenAI → Groq → OpenRouter → Ollama.
   let ollama, provider;
-  if (config.groqKey) {
+  if (config.openAIKey) {
+    ollama   = makeOpenAI(config);
+    provider = `openai:${config.openAIModel}`;
+    config.plannerModel = config.openAIModel;
+    config.workerModel  = config.openAIModel;
+  } else if (config.groqKey) {
     ollama   = makeGroq(config);
     provider = `groq:${config.groqModel}`;
     config.plannerModel = config.groqModel;
