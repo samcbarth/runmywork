@@ -1,6 +1,6 @@
 const App = (() => {
   // Bumped on each deploy so you can confirm which build is live (shown in Settings).
-  const BUILD = '2026-06-06 · criterion-done + summary + notifications';
+  const BUILD = '2026-06-06 · auto-trigger on open';
 
   let _timerInterval = null;
   let _swRegistration = null;
@@ -207,6 +207,7 @@ const App = (() => {
     Views.Approvals.updateBadge();
     Views.Approvals.autoApplyPending();          // silently apply any auto-approve policies
     Views.Approvals.notifyCriterionReview();     // notify if criterion proposals are pending
+    Sync.triggerAgent();                         // kick off a GitHub Actions run (20-min cooldown)
 
     _handleRoute();
   }

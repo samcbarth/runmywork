@@ -537,10 +537,27 @@ const Sync = (() => {
     }
   }
 
+  // Fire-and-forget: call the edge function to dispatch a GitHub Actions run.
+  // 20-minute client-side cooldown prevents hammering on every page refresh.
+  const _TRIGGER_KEY = 'rmw_last_trigger';
+  const _TRIGGER_COOLDOWN = 20 * 60 * 1000;
+  async function triggerAgent() {
+    if (!isConfigured()) return;
+    const last = parseInt(localStorage.getItem(_TRIGGER_KEY) || '0', 10);
+    if (Date.now() - last < _TRIGGER_COOLDOWN) return;
+    localStorage.setItem(_TRIGGER_KEY, String(Date.now()));
+    try {
+      fetch(`${SUPABASE_URL}/functions/v1/trigger-agent`, {
+        method: 'POST',
+        headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` }
+      });
+    } catch { /* silent — agent trigger is best-effort */ }
+  }
+
   return {
     pull, push, pushProject, remove,
     pullApprovals, decideApproval, addWorklog, pullWorklog,
     pullContext, addContext, pullLatestRun, pullErrorLog,
-    isConfigured, rowToProject, projectToRow
+    isConfigured, rowToProject, projectToRow, triggerAgent
   };
 })();
