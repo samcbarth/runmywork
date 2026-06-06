@@ -36,12 +36,20 @@ function parseArgs(argv) {
     else if (t === '--plan') a.plan = true;
     else if (t === '--list') a.list = true;
     else if (t === '--force') a.force = true;
+    else if (t === '--local') a.forceLocal = true;   // always use Ollama
+    else if (t === '--cloud') a.forceCloud = true;   // always use best cloud provider
     else if (t === '--project') a.project = argv[++i];
     else if (t === '--goal') a.goal = argv[++i];
     else if (t === '--budget') a.budget = parseInt(argv[++i], 10);
     else a._.push(t);
   }
   return a;
+}
+
+// Decide whether a goal requires cloud (code edits, git) or can run local (research, proposals).
+function goalNeedsCloud(goal) {
+  if (!goal) return false;
+  return /edit|patch|write|fix|refactor|commit|implement|add.*feature|update.*file|change.*code/i.test(goal);
 }
 
 function log(...args) { console.log('[agent]', ...args); }
@@ -199,6 +207,8 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   const config = loadConfig();
   if (args.force) config.force = true;
+  if (args.forceLocal) config.forceLocal = true;
+  if (args.forceCloud) config.forceCloud = true;
 
   const missing = validate(config);
   if (missing.length) {
@@ -207,19 +217,28 @@ async function main() {
   }
 
   const sb = makeSupabase(config);
-  // Provider priority: OpenAI → Groq → OpenRouter → Ollama.
+  // Provider selection:
+  //   --local          → always Ollama (free, good for research/proposals)
+  //   --cloud          → always best available cloud
+  //   auto (default)   → cloud if goal involves code edits, otherwise Ollama
+  //   no cloud keys    → always Ollama
+  const hasCloud = config.openAIKey || config.groqKey || config.openRouterKey;
+  const goalText = args.goal || '';
+  const useCloud = !config.forceLocal && hasCloud &&
+    (config.forceCloud || goalNeedsCloud(goalText) || !config.ollamaModel);
+
   let ollama, provider;
-  if (config.openAIKey) {
+  if (useCloud && config.openAIKey) {
     ollama   = makeOpenAI(config);
     provider = `openai:${config.openAIModel}`;
     config.plannerModel = config.openAIModel;
     config.workerModel  = config.openAIModel;
-  } else if (config.groqKey) {
+  } else if (useCloud && config.groqKey) {
     ollama   = makeGroq(config);
     provider = `groq:${config.groqModel}`;
     config.plannerModel = config.groqModel;
     config.workerModel  = config.groqModel;
-  } else if (config.openRouterKey) {
+  } else if (useCloud && config.openRouterKey) {
     ollama   = makeOpenRouter(config);
     provider = `openrouter:${config.openRouterModel}`;
     config.plannerModel = config.openRouterModel;
