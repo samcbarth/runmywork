@@ -48,6 +48,13 @@ function parseArgs(argv) {
 
 function log(...args) { console.log('[agent]', ...args); }
 
+// Does this goal require reliable code editing? Local qwen3:8b can't do those
+// well, so those tasks go cloud-first. Routine work (research/proposals) stays local.
+function goalNeedsCloud(goal) {
+  if (!goal) return false;
+  return /\b(edit|patch|fix|write|refactor|implement|commit|add a |add the |create.*file|modify|change.*code|wire up)\b/i.test(goal);
+}
+
 // Build a compact two-level file tree from the project root so the model
 // knows exactly which paths exist before attempting any reads or writes.
 function buildFileTree(root, maxDepth = 2) {
@@ -212,25 +219,28 @@ async function main() {
   }
 
   const sb = makeSupabase(config);
-  // Build the provider CHAIN (free-first, falls over mid-run on failure):
-  //   1. Groq          — free, llama-3.3-70b (~100k tokens/DAY limit)
-  //   2. OpenRouter    — free model tier, rate-limited
-  //   3. OpenAI        — paid fallback (~$0.005/run), only when free exhausted
-  //   4. Ollama local  — final fallback, always available
-  //
-  // --local  → Ollama only
-  // --cloud  → skip free tier, OpenAI → Ollama
-  const chain = [];
+  // Build the provider CHAIN. Order depends on the task — and the chain falls
+  // over mid-run on any failure (rate limit / model down / OOM):
+  //   • routine work (research, proposals, autonomous 3h runs) → LOCAL FIRST
+  //     (free qwen3:8b is good enough), cloud only if local errors.
+  //   • code edits (--goal contains edit/patch/fix/write/...)  → CLOUD FIRST
+  //     (qwen3:8b can't do reliable code edits), local as last resort.
+  //   • --local → Ollama only.   • --cloud → cloud first, then Ollama.
+  const localLink  = { label: 'ollama', impl: makeOllama(config) };
+  const cloudLinks = [];
+  if (config.groqKey)       cloudLinks.push({ label: `groq:${config.groqModel}`,            impl: makeGroq(config) });
+  if (config.openRouterKey) cloudLinks.push({ label: `openrouter:${config.openRouterModel}`, impl: makeOpenRouter(config) });
+  if (config.openAIKey)     cloudLinks.push({ label: `openai:${config.openAIModel}`,         impl: makeOpenAI(config) });
+
+  let chain;
   if (config.forceLocal) {
-    chain.push({ label: 'ollama', impl: makeOllama(config) });
+    chain = [localLink];
   } else if (config.forceCloud) {
-    if (config.openAIKey)     chain.push({ label: `openai:${config.openAIModel}`, impl: makeOpenAI(config) });
-    chain.push({ label: 'ollama', impl: makeOllama(config) });
+    chain = [...cloudLinks, localLink];
+  } else if (goalNeedsCloud(args.goal)) {
+    chain = [...cloudLinks, localLink];     // code task → cloud first
   } else {
-    if (config.groqKey)       chain.push({ label: `groq:${config.groqModel}`,           impl: makeGroq(config) });
-    if (config.openRouterKey) chain.push({ label: `openrouter:${config.openRouterModel}`, impl: makeOpenRouter(config) });
-    if (config.openAIKey)     chain.push({ label: `openai:${config.openAIModel}`,        impl: makeOpenAI(config) });
-    chain.push({ label: 'ollama', impl: makeOllama(config) });
+    chain = [localLink, ...cloudLinks];     // routine → local first
   }
 
   const ollama   = chain.length > 1 ? makeChainedProvider(chain, log) : chain[0].impl;
