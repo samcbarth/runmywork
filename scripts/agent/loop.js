@@ -252,6 +252,21 @@ async function runLoop(opts) {
           });
         }
       }
+      // If the model called done() without writing any files when the goal
+      // explicitly asks for a file change — push back once so it actually executes.
+      if (name === 'done' && ctx.done && depth === 0) {
+        const goalAsksForWrite = /patch|edit|write|modify|change|update|add.*line|remove.*line/i.test(opts.goal || '');
+        const didWrite = (ctx.changedFiles || []).length > 0;
+        if (goalAsksForWrite && !didWrite && steps < budget - 1) {
+          ctx.done = false;   // rescind done — give it one more chance
+          messages.push({
+            role: 'user',
+            content: 'You called done but the goal required a file edit and no files were changed. Use write_file to make the change now, then call done again.'
+          });
+          continue;
+        }
+      }
+
       messages.push({ role: 'tool', content: result, tool_name: name });
 
       // feed the tracker (the `stage` tool updates stage/percent itself)
