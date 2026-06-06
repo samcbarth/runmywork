@@ -36,11 +36,6 @@ Views.Settings = (() => {
           </label>
         </div>
 
-<div style="margin-top:12px;padding:12px;background:var(--surface-2);border-radius:var(--radius-sm);font-size:0.82rem;color:var(--text-2);line-height:1.7;">
-          Push notifications (phone + desktop, even when app is closed) come via <strong>ntfy</strong>.<br>
-          Install the <a href="https://ntfy.sh" target="_blank" rel="noopener" style="color:var(--accent);">ntfy app</a> and subscribe to topic: <code style="background:var(--border);padding:2px 6px;border-radius:4px;color:var(--text);">rmw-sam-9k2x7p</code>
-        </div>
-
         <button class="btn btn-primary" id="save-notif-btn" style="margin-top:12px;">Save</button>
       </div>
 

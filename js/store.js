@@ -257,8 +257,6 @@ const Sync = (() => {
   const SUPABASE_URL      = 'https://tmqffprfhavzbaycvxej.supabase.co';
   const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRtcWZmcHJmaGF2emJheWN2eGVqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1NDE1MTQsImV4cCI6MjA5NjExNzUxNH0.rtcPzaPwo2qMYJdm_sdpOvjEuEuK0O0I6r-pPrqCma4';
 
-  const NTFY_TOPIC = 'rmw-sam-9k2x7p';   // hardcoded — subscribe to this in the ntfy app
-
   const REST    = `${SUPABASE_URL.replace(/\/+$/, '')}/rest/v1`;
   const HEADERS = {
     apikey:         SUPABASE_ANON_KEY,
@@ -312,7 +310,6 @@ const Sync = (() => {
       const local = Store.getSettings();
       Store.saveSettings({
         ...local,
-        ntfyTopic:  settingsRow.ntfy_topic || local.ntfyTopic || '',
         thresholds: settingsRow.thresholds || local.thresholds
       });
     }
@@ -365,7 +362,7 @@ const Sync = (() => {
       const sRes = await _fetchWithTimeout(`${REST}/settings?on_conflict=id`, {
         method: 'POST',
         headers: { ...HEADERS, Prefer: 'resolution=merge-duplicates,return=minimal' },
-        body: JSON.stringify([{ id: 1, ntfy_topic: NTFY_TOPIC, thresholds: settings.thresholds || {} }])
+        body: JSON.stringify([{ id: 1, thresholds: settings.thresholds || {} }])
       });
       _pushing = false;
       if (!sRes.ok) return { ok: false, reason: `settings http-${sRes.status}` };
@@ -540,6 +537,6 @@ const Sync = (() => {
     pull, push, pushProject, remove,
     pullApprovals, decideApproval, addWorklog, pullWorklog,
     pullContext, addContext, pullLatestRun, pullErrorLog,
-    isConfigured, rowToProject, projectToRow, NTFY_TOPIC
+    isConfigured, rowToProject, projectToRow
   };
 })();

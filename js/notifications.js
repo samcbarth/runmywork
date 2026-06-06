@@ -35,28 +35,10 @@ const Notifications = (() => {
         if (reg) reg.showNotification(project.title, opts);
         else new Notification(project.title, opts);
       } catch { /* silent */ }
-
-      _sendNtfy(project.title, body, project.status === 'blocked' ? 'high' : 'default').catch(() => {});
     }
 
     settings.lastNotificationCheck = now;
     Store.saveSettings(settings);
-  }
-
-  function ping(title, body, priority) {
-    _sendNtfy(title, body, priority).catch(() => {});
-  }
-
-  async function _sendNtfy(title, body, priority) {
-    await fetch(`https://ntfy.sh/${Sync.NTFY_TOPIC}`, {
-      method: 'POST',
-      headers: {
-        'Title':    title,
-        'Priority': priority || 'default',
-        'Tags':     priority === 'high' ? 'rotating_light' : 'calendar'
-      },
-      body
-    });
   }
 
   async function requestPermission() {
@@ -69,7 +51,6 @@ const Notifications = (() => {
   }
 
   async function tryRegisterPeriodicSync(reg) {
-    console.log('periodic sync registration attempted');
     if (!('periodicSync' in reg)) return;
     try {
       const status = await navigator.permissions.query({ name: 'periodic-background-sync' });
@@ -79,5 +60,5 @@ const Notifications = (() => {
     } catch { /* not supported */ }
   }
 
-  return { checkOnOpen, ping, requestPermission, tryRegisterPeriodicSync };
+  return { checkOnOpen, requestPermission, tryRegisterPeriodicSync };
 })();

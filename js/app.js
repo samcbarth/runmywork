@@ -1,6 +1,6 @@
 const App = (() => {
   // Bumped on each deploy so you can confirm which build is live (shown in Settings).
-  const BUILD = '2026-06-05 · exec-mode';
+  const BUILD = '2026-06-05 · native-notif';
 
   let _timerInterval = null;
   let _swRegistration = null;
