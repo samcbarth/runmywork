@@ -8,6 +8,7 @@ Views.Approvals = (() => {
       case 'set_status':   return `Set status → ${p.status}`;
       case 'set_priority': return `Set priority → ${p.priority}`;
       case 'add_link':     return `Add link: ${p.label || p.url || ''}`;
+      case 'set_spec':     return `Set project spec (${Array.isArray(p.successCriteria) ? p.successCriteria.length : 0} success criteria)`;
       default:             return a.action_type;
     }
   }
@@ -20,6 +21,19 @@ Views.Approvals = (() => {
     }
     if (a.action_type === 'set_status' && p.note) {
       return `<p class="approval-detail-note">${Models.escapeHtml(p.note)}</p>`;
+    }
+    if (a.action_type === 'set_spec') {
+      const sec = (label, arr, ordered) => {
+        if (!Array.isArray(arr) || !arr.length) return '';
+        const tag = ordered ? 'ol' : 'ul';
+        return `<div class="approval-detail-note"><strong>${label}</strong><${tag} class="approval-detail-list">${arr.map(x => `<li>${Models.escapeHtml(x)}</li>`).join('')}</${tag}></div>`;
+      };
+      return [
+        p.goal ? `<p class="approval-detail-note"><strong>Goal:</strong> ${Models.escapeHtml(p.goal)}</p>` : '',
+        sec('Requirements', p.requirements, false),
+        sec('Success criteria', p.successCriteria, true),
+        sec('Constraints', p.constraints, false)
+      ].filter(Boolean).join('');
     }
     return '';
   }
@@ -108,6 +122,20 @@ Views.Approvals = (() => {
         project.links = project.links || [];
         project.links.push({ label: p.label || p.url, url: p.url });
         break;
+      case 'set_spec': {
+        if (!p.goal) return false;
+        // Write the spec as append-only project_context rows (one per field).
+        const rows = [{ kind: 'goal', content: p.goal }];
+        (p.requirements    || []).forEach(c => rows.push({ kind: 'requirement',      content: c }));
+        (p.successCriteria || []).forEach(c => rows.push({ kind: 'success_criteria', content: c }));
+        (p.constraints     || []).forEach(c => rows.push({ kind: 'constraint',       content: c }));
+        rows.forEach(r => {
+          if (r.content && r.content.trim()) {
+            Sync.addContext({ project_id: a.project_id, kind: r.kind, content: r.content.trim(), created_by: 'agent-approved' });
+          }
+        });
+        return true;   // context rows are written directly; no project mutation
+      }
       default:
         return false;
     }

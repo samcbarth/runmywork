@@ -16,6 +16,7 @@
 const fs = require('fs');
 const path = require('path');
 const { loadTools, toSchemas, dispatch } = require('./registry');
+const { verifyFile } = require('./tools/verify');
 
 const WORK = path.join(__dirname, 'work');
 
@@ -82,8 +83,9 @@ REAL PROJECT FILES ARE ACCESSIBLE. Execution rules (strict):
 3. Use find_in_file to get the EXACT text block you want to replace — never type old_string from memory.
 4. Use write_file op patch with the exact_match from find_in_file as old_string.
 5. If write_file returns "old_string not found", call find_in_file again with a different search term.
-6. After writing, use git op add then git op commit with a clear message describing what changed.
-7. Never commit .env files or secrets.
+6. After writing code, call verify on the file to confirm it has no syntax errors. Fix any errors before continuing.
+7. Then use git op add and git op commit with a clear message describing what changed.
+8. Never commit .env files or secrets.
 ` : '';
 
   // Groq/llama models misfire into XML hermes format when the system prompt quotes
@@ -96,6 +98,9 @@ REAL PROJECT FILES ARE ACCESSIBLE. Execution rules (strict):
 You are given ONE project and a goal. Make real progress using the available tools, then stop.
 
 Rules:
+- The PROJECT SPEC (goal + success criteria) is your north star. Every run should move
+  at least one success criterion closer to met. If the project has no spec yet, your job
+  is to research it and propose one (action set_spec).
 - Take action — don't describe what you would do.
 - Record findings with the note tool so they persist for next time.
 - Save research and drafts with the save_artifact tool.
@@ -110,6 +115,9 @@ Project: "${project ? project.title : '(board-level)'}".`;
 
 function buildUserPrompt(goal, project, contextText) {
   const lines = [];
+  // SPEC + memory lead (contextText starts with the authoritative PROJECT SPEC), so the
+  // spec frames everything before the model even sees the mutable project state.
+  if (contextText) { lines.push('CONTEXT & MEMORY', contextText, ''); }
   if (project) {
     lines.push(`PROJECT STATE`);
     lines.push(`Title: ${project.title}`);
@@ -123,7 +131,6 @@ function buildUserPrompt(goal, project, contextText) {
     if (done.length) lines.push(`(${done.length} task(s) already completed — do not work on those.)`);
     if (project.links?.length) lines.push(`Links: ${project.links.map(l => l.url).join(', ')}`);
   }
-  if (contextText) { lines.push('', 'CONTEXT & MEMORY', contextText); }
   lines.push('', `GOAL`, goal);
   return lines.join('\n');
 }
@@ -148,7 +155,9 @@ async function runLoop(opts) {
     proposals: [],
     artifacts: [],
     findings: [],
-    changedFiles: [],   // real project files written by write_file tool
+    changedFiles: [],     // real project files written by write_file tool
+    committed: false,     // set true by git commit (reality check)
+    criteriaAdvanced: '', // set by done tool (which success criterion advanced)
     done: false,
     doneSummary: '',
     currentStage: 'look',
@@ -186,8 +195,10 @@ async function runLoop(opts) {
   let schemas = toSchemas(ctx.tools);
   let steps = 0;
   let modelErrored = false;
+  let stalled = false;
+  const callCounts = new Map();   // repetition guard: identical tool+args signature → count
 
-  while (steps < budget && !ctx.done) {
+  while (steps < budget && !ctx.done && !stalled) {
     steps++;
     let resp;
     try {
@@ -227,6 +238,31 @@ async function runLoop(opts) {
       if (typeof args === 'string') { try { args = JSON.parse(args); } catch { args = {}; } }
 
       log(`  ${'·'.repeat(depth + 1)} ${name}(${preview(args)})`);
+
+      // Repetition guard: the same tool+args repeated isn't working. Nudge at 3,
+      // break at 5 so a stuck model can't burn the whole budget on one dead action.
+      if (name !== 'done' && name !== 'stage') {
+        const sig = `${name}:${JSON.stringify(args)}`;
+        const n = (callCounts.get(sig) || 0) + 1;
+        callCounts.set(sig, n);
+        if (n >= 5) {
+          if (depth === 0) {
+            await sb.logError({
+              projectId: project && project.id, runId: ctx.run && ctx.run.id,
+              stepNumber: steps, toolName: name,
+              errorMessage: `Repetition stall: "${name}" called ${n}× with identical args — aborting run.`
+            });
+          }
+          stalled = true;
+          break;
+        }
+        if (n === 3) {
+          messages.push({ role: 'user', content: `You've called ${name} with the same arguments 3 times and it isn't working. Stop repeating it — try a different approach, a different tool, or call done.` });
+          // skip dispatching the 3rd identical call; let the model rethink
+          continue;
+        }
+      }
+
       let result;
       try {
         result = await dispatch(ctx.tools, name, args, ctx);
@@ -243,18 +279,39 @@ async function runLoop(opts) {
           });
         }
       }
-      // If the model called done() without writing any files when the goal
-      // explicitly asks for a file change — push back once so it actually executes.
+      // On done, run two self-correction gates (top-level project loops only):
       if (name === 'done' && ctx.done && depth === 0) {
-        const goalAsksForWrite = /patch|edit|write|modify|change|update|add.*line|remove.*line/i.test(opts.goal || '');
+        // Gate 1 — goal asked for a code change but nothing was written.
+        const goalAsksForWrite = /patch|edit|write|modify|change|update|add.*line|remove.*line|wire up/i.test(opts.goal || '');
         const didWrite = (ctx.changedFiles || []).length > 0;
         if (goalAsksForWrite && !didWrite && steps < budget - 1) {
-          ctx.done = false;   // rescind done — give it one more chance
-          messages.push({
-            role: 'user',
-            content: 'You called done but the goal required a file edit and no files were changed. Use write_file to make the change now, then call done again.'
-          });
+          ctx.done = false;
+          messages.push({ role: 'user', content: 'You called done but the goal required a file edit and no files were changed. Use write_file to make the change now, then call done again.' });
           continue;
+        }
+
+        // Gate 2 — verify changed code is syntactically valid. Block done + force a fix.
+        const root = config.projectRoot;
+        if (root && didWrite && steps < budget - 1) {
+          const broken = [];
+          for (const f of ctx.changedFiles) {
+            try {
+              const v = verifyFile(root, f.path);
+              if (!v.ok) broken.push(`${f.path}${v.line ? ` (line ${v.line})` : ''}: ${v.error}`);
+            } catch { /* skip unverifiable */ }
+          }
+          if (broken.length) {
+            ctx.done = false;
+            if (depth === 0) {
+              await sb.logError({
+                projectId: project && project.id, runId: ctx.run && ctx.run.id,
+                stepNumber: steps, toolName: 'verify',
+                errorMessage: `Verify gate rejected done — syntax errors:\n${broken.join('\n')}`
+              });
+            }
+            messages.push({ role: 'user', content: `You called done but the file(s) you changed have syntax errors:\n${broken.join('\n')}\nFix them with write_file, run verify to confirm, then call done again.` });
+            continue;
+          }
         }
       }
 
@@ -273,7 +330,7 @@ async function runLoop(opts) {
   }
 
   // log budget exhaustion (agent ran out of steps without calling done)
-  if (!ctx.done && !modelErrored && depth === 0 && project) {
+  if (!ctx.done && !modelErrored && !stalled && depth === 0 && project) {
     await sb.logError({
       projectId: project.id,
       runId: ctx.run && ctx.run.id,
@@ -282,6 +339,22 @@ async function runLoop(opts) {
       errorStack: null,
       toolName: null
     });
+  }
+
+  // Reality check (anti-hallucination): if the summary implies file/commit changes
+  // but none were actually recorded, correct the summary and log the mismatch.
+  if (depth === 0 && project) {
+    const claimsChange = /\b(wrote|edited|patched|committed|updated the file|added.*to|changed.*file|implemented|fixed)\b/i.test(ctx.doneSummary || '');
+    const reallyChanged = (ctx.changedFiles || []).length > 0 || ctx.committed;
+    if (claimsChange && !reallyChanged) {
+      ctx.doneSummary = `${ctx.doneSummary}\n(note: no file changes were actually recorded this run.)`;
+      try {
+        await sb.logError({
+          projectId: project.id, runId: ctx.run && ctx.run.id, stepNumber: steps, toolName: null,
+          errorMessage: `Summary/reality mismatch — model claimed a change but no files changed and nothing was committed.`
+        });
+      } catch { /* best effort */ }
+    }
   }
 
   // finalize the tracker run
@@ -304,7 +377,9 @@ async function runLoop(opts) {
     proposals: ctx.proposals,
     artifacts: ctx.artifacts,
     findings: ctx.findings,
-    changedFiles: ctx.changedFiles || []
+    changedFiles: ctx.changedFiles || [],
+    committed: Boolean(ctx.committed),
+    criteriaAdvanced: ctx.criteriaAdvanced || ''
   };
 }
 

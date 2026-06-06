@@ -1,6 +1,6 @@
 const App = (() => {
   // Bumped on each deploy so you can confirm which build is live (shown in Settings).
-  const BUILD = '2026-06-05 · provider-chain';
+  const BUILD = '2026-06-05 · spec-system';
 
   let _timerInterval = null;
   let _swRegistration = null;

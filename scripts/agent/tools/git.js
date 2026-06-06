@@ -94,8 +94,7 @@ module.exports = {
           fs.writeFileSync(tmp, fullMsg, 'utf8');
           try {
             const out = run(`git commit -F "${tmp}"`, root);
-            // track in ctx
-            if (!ctx.changedFiles) ctx.changedFiles = [];
+            ctx.committed = true;   // reality check: a real commit happened
             return { ok: true, output: trunc(out, 500) };
           } finally {
             try { fs.unlinkSync(tmp); } catch {}

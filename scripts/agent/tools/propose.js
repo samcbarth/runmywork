@@ -38,8 +38,22 @@ function buildPayload(action, args) {
       if (!/^https?:\/\//i.test(url)) throw new Error('add_link needs a valid http(s) "url"');
       return { url, label: (args.label || url).slice(0, 120) };
     }
+    case 'set_spec': {
+      const goal = String(args.goal || '').trim();
+      if (!goal) throw new Error('set_spec needs a non-empty "goal" string');
+      const list = (v) => (Array.isArray(v) ? v : [])
+        .map(s => String(s || '').trim()).filter(Boolean).slice(0, 8);
+      const successCriteria = list(args.successCriteria);
+      if (!successCriteria.length) throw new Error('set_spec needs at least one "successCriteria" item');
+      return {
+        goal: goal.slice(0, 600),
+        requirements:    list(args.requirements),
+        successCriteria,
+        constraints:     list(args.constraints)
+      };
+    }
     default:
-      throw new Error(`unknown action "${action}". Use add_tasks | set_status | set_priority | add_link`);
+      throw new Error(`unknown action "${action}". Use add_tasks | set_status | set_priority | add_link | set_spec`);
   }
 }
 
@@ -52,17 +66,18 @@ function alreadyPending(pending, action, payload) {
     if (action === 'set_priority') return p.priority === payload.priority;
     if (action === 'add_link') return p.url === payload.url;
     if (action === 'add_tasks') return true;   // one pending add_tasks batch is enough
+    if (action === 'set_spec') return true;    // one pending spec proposal is enough
     return false;
   });
 }
 
 module.exports = {
   name: 'propose',
-  description: 'Propose a change to the project that the human approves in the app. This is the ONLY way to change tracked state. action is one of: add_tasks (args.tasks: string[]), set_status (args.status: active|blocked|idle|done), set_priority (args.priority: low|medium|high), add_link (args.url, args.label). Always include a clear rationale.',
+  description: 'Propose a change to the project that the human approves in the app. This is the ONLY way to change tracked state. action is one of: add_tasks (args.tasks: string[]), set_status (args.status: active|blocked|idle|done), set_priority (args.priority: low|medium|high), add_link (args.url, args.label), set_spec (args.goal, args.requirements[], args.successCriteria[], args.constraints[] — defines the project goal + measurable success criteria). Always include a clear rationale.',
   parameters: {
     type: 'object',
     properties: {
-      action: { type: 'string', enum: ['add_tasks', 'set_status', 'set_priority', 'add_link'] },
+      action: { type: 'string', enum: ['add_tasks', 'set_status', 'set_priority', 'add_link', 'set_spec'] },
       rationale: { type: 'string', description: 'Why this change — shown to the human in the approval.' },
       tasks: { type: 'array', items: { type: 'string' }, description: 'For add_tasks.' },
       status: { type: 'string', description: 'For set_status.' },
@@ -70,6 +85,10 @@ module.exports = {
       url: { type: 'string', description: 'For add_link.' },
       label: { type: 'string', description: 'For add_link.' },
       note: { type: 'string', description: 'Optional note for set_status.' },
+      goal: { type: 'string', description: 'For set_spec: one-sentence project goal.' },
+      requirements: { type: 'array', items: { type: 'string' }, description: 'For set_spec: key requirements.' },
+      successCriteria: { type: 'array', items: { type: 'string' }, description: 'For set_spec: 3-6 measurable, checkable success criteria.' },
+      constraints: { type: 'array', items: { type: 'string' }, description: 'For set_spec: constraints/boundaries.' },
       project_id: { type: 'string', description: 'Board-planner mode only: which project to target. Omit when working a single project.' }
     },
     required: ['action', 'rationale']
@@ -109,6 +128,7 @@ module.exports = {
     const desc = action === 'add_tasks' ? `add ${payload.tasks.length} task(s)`
       : action === 'set_status' ? `status → ${payload.status}`
       : action === 'set_priority' ? `priority → ${payload.priority}`
+      : action === 'set_spec' ? `spec (${payload.successCriteria.length} criteria)`
       : `link ${payload.label}`;
     ctx.proposals.push(desc);
     return { ok: true, proposed: desc, note: 'Filed for human approval in the app inbox.' };

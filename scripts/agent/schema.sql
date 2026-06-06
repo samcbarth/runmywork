@@ -8,7 +8,8 @@ create table if not exists public.project_context (
   id         uuid primary key default gen_random_uuid(),
   project_id uuid not null references public.projects(id) on delete cascade,
   content    text not null,
-  kind       text not null default 'note',   -- note|requirement|decision|history|instruction|goal|constraint
+  kind       text not null default 'note',   -- note|goal|requirement|success_criteria|constraint|decision|history|instruction
+                                              -- (goal/requirement/success_criteria/constraint = the project SPEC)
   created_by text not null default 'user',     -- user|agent
   created_at bigint not null
 );

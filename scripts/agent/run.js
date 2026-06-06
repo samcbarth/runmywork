@@ -38,6 +38,7 @@ function parseArgs(argv) {
     else if (t === '--force') a.force = true;
     else if (t === '--local') a.forceLocal = true;   // always use Ollama
     else if (t === '--cloud') a.forceCloud = true;   // always use best cloud provider
+    else if (t === '--spec')  a.spec = true;         // force a spec-draft run
     else if (t === '--project') a.project = argv[++i];
     else if (t === '--goal') a.goal = argv[++i];
     else if (t === '--budget') a.budget = parseInt(argv[++i], 10);
@@ -88,46 +89,105 @@ function needsAgent(p, force) {
   return false;
 }
 
-// Recent worklog → compact memory text fed back into the loop (Phase 2).
-async function buildMemory(sb, projectId) {
-  // 1. User-authored knowledge (project_context) — durable background the user
-  //    wrote so the agent doesn't need re-briefing. Treated as authoritative.
-  let knowledge = '';
-  try {
-    const rows = await sb.pullContext(projectId, 30);
-    if (rows.length) {
-      const text = rows.slice().reverse().map(r => `[${r.kind}] ${r.content}`).join('\n\n');
-      knowledge = text.length > 6000 ? '…' + text.slice(-6000) : text;   // keep newest, cap for small models
-    }
-  } catch { /* best effort */ }
+// project_context kinds that together form the project SPEC (the north star).
+const SPEC_KINDS = new Set(['goal', 'requirement', 'success_criteria', 'constraint']);
 
-  // 2. Recent agent journal (worklog) — what the agent did/learned last runs.
+// Partition context rows (newest-first) into the structured spec + freeform background.
+function partitionSpec(rows) {
+  const byKind = { goal: [], requirement: [], success_criteria: [], constraint: [] };
+  const background = [];
+  for (const r of rows) {
+    if (SPEC_KINDS.has(r.kind)) byKind[r.kind].push(String(r.content || '').trim());
+    else background.push(`[${r.kind}] ${r.content}`);
+  }
+  // requirements/criteria/constraints: reverse to roughly authored order; dedupe.
+  const uniq = (arr) => [...new Set(arr.filter(Boolean))];
+  const requirements = uniq(byKind.requirement.slice().reverse());
+  const criteria     = uniq(byKind.success_criteria.slice().reverse());
+  const constraints  = uniq(byKind.constraint.slice().reverse());
+  const goal         = byKind.goal[0] || '';   // newest goal wins
+
+  const specLines = [];
+  if (goal)               specLines.push(`Goal: ${goal}`);
+  if (requirements.length) specLines.push(`Requirements:\n${requirements.map(s => `  - ${s}`).join('\n')}`);
+  if (criteria.length)     specLines.push(`Success criteria:\n${criteria.map((s, i) => `  ${i + 1}. ${s}`).join('\n')}`);
+  if (constraints.length)  specLines.push(`Constraints:\n${constraints.map(s => `  - ${s}`).join('\n')}`);
+
+  return {
+    specText: specLines.join('\n'),
+    hasGoal: Boolean(goal) || criteria.length > 0,
+    criteria,
+    background
+  };
+}
+
+// Build the ordered context fed to the loop: SPEC → WHERE YOU LEFT OFF → BACKGROUND →
+// JOURNAL. Returns { text, spec } so the goal can be framed against the spec.
+async function buildContext(sb, projectId) {
+  let rows = [];
+  try { rows = await sb.pullContext(projectId, 40); } catch { /* best effort */ }
+  const spec = partitionSpec(rows);
+
+  let progress = '';
   let journal = '';
   try {
-    const entries = await sb.pullWorklog(projectId, 14);
-    journal = entries.slice().reverse()
+    const entries = await sb.pullWorklog(projectId, 16);   // newest-first
+    const prog = entries.find(e => e.kind === 'progress');
+    if (prog) {
+      const adv = prog.detail && prog.detail.criteriaAdvanced;
+      progress = `${prog.summary}${adv ? `\nCriterion advanced: ${adv}` : ''}`;
+    }
+    const seen = new Set();
+    journal = entries
+      .filter(e => e.kind !== 'progress')
+      .filter(e => { const k = (e.summary || '').slice(0, 80); if (seen.has(k)) return false; seen.add(k); return true; })
+      .slice(0, 10).reverse()
       .map(e => `- [${e.kind}] ${e.summary}`.trim())
       .filter(l => l.length > 6)
       .join('\n');
   } catch { /* best effort */ }
 
-  const parts = [];
-  if (knowledge) parts.push(`PROJECT KNOWLEDGE (user-provided context — authoritative background):\n${knowledge}`);
-  if (journal) parts.push(`RECENT AGENT JOURNAL:\n${journal}`);
-  return parts.join('\n\n');
+  let background = '';
+  if (spec.background.length) {
+    const text = spec.background.slice().reverse().join('\n\n');
+    background = text.length > 5000 ? '…' + text.slice(-5000) : text;
+  }
+
+  const blocks = [];
+  if (spec.specText) blocks.push(`PROJECT SPEC (authoritative — all work must serve this):\n${spec.specText}`);
+  if (progress)      blocks.push(`WHERE YOU LEFT OFF (continue from here — do not repeat finished work):\n${progress}`);
+  if (background)    blocks.push(`BACKGROUND (user-provided context):\n${background}`);
+  if (journal)       blocks.push(`RECENT JOURNAL:\n${journal}`);
+
+  return { text: blocks.join('\n\n'), spec };
 }
 
 async function runForProject(services, project, goalOverride, budgetOverride) {
-  const { sb } = services;
-  // Goal is derived from the project's CURRENT open state — NOT the agent's own
-  // last summary. Using the prior summary as the next goal made the agent fixate
-  // on whatever it mentioned last (e.g. one task) run after run.
-  const openTasks = (project.tasks || []).filter(t => !t.done).map(t => t.text);
-  const focus = openTasks.length ? ` Prioritise the open tasks: ${openTasks.slice(0, 5).join('; ')}.` : '';
-  const goal = goalOverride
-    || `Make concrete, useful progress on "${project.title}".${focus} Research what's needed, draft or build a deliverable, save it, and propose the next tasks or a status change. Produce something — don't just plan. Do not re-investigate things already marked done.`;
+  const { sb, config } = services;
+  const { text: memoryText, spec } = await buildContext(sb, project.id);
 
-  const contextText = await buildMemory(sb, project.id);
+  // Goal framing, in priority order (Component 3):
+  //   1. explicit --goal override
+  //   2. no spec yet (or --spec) → SPEC MODE: research + propose a set_spec
+  //   3. spec with success criteria → advance the next unmet criterion
+  //   4. spec/goal but no criteria → open-task fallback
+  let goal;
+  let specMode = false;
+  if (goalOverride) {
+    goal = goalOverride;
+  } else if (config.forceSpec || !spec.hasGoal) {
+    specMode = true;
+    goal = `This project has no clear spec yet. Research it — read the project context, tasks, and any linked code or files — then call the propose tool with action "set_spec" to define: a one-sentence goal, the key requirements, and 3-6 measurable, checkable success criteria that mean the project is "done". Do this BEFORE any other work, and finish once the spec proposal is filed.`;
+  } else if (spec.criteria.length) {
+    const list = spec.criteria.map((c, i) => `  ${i + 1}. ${c}`).join('\n');
+    goal = `Advance this project toward its success criteria. Pick the next UNMET criterion and do real, concrete work toward it — research, draft, build a deliverable, edit code, or propose the change. In your done summary, state which criterion you advanced and whether it is now met.\nSuccess criteria:\n${list}`;
+  } else {
+    const openTasks = (project.tasks || []).filter(t => !t.done).map(t => t.text);
+    const focus = openTasks.length ? ` Prioritise the open tasks: ${openTasks.slice(0, 5).join('; ')}.` : '';
+    goal = `Make concrete, useful progress on "${project.title}".${focus} Produce something real — don't just plan. Do not re-investigate things already marked done.`;
+  }
+
+  const contextText = memoryText;
 
   // Inject real file tree so the model never guesses paths.
   // Cloud free tiers have tight token/day limits — use a shallow (1-level) tree to save tokens.
@@ -138,7 +198,7 @@ async function runForProject(services, project, goalOverride, budgetOverride) {
     try { fileTree = buildFileTree(services.config.projectRoot, depth); } catch { /* best effort */ }
   }
 
-  log(`▶ ${project.title}  [${project.status}]`);
+  log(`▶ ${project.title}  [${project.status}]${specMode ? '  (spec mode)' : ''}`);
   log(`   goal: ${goal.slice(0, 100)}`);
 
   const result = await runLoop({
@@ -156,12 +216,20 @@ async function runForProject(services, project, goalOverride, budgetOverride) {
     } catch (e) { log(`   (could not update headline: ${e.message})`); }
   }
 
+  // One factual PROGRESS entry per run — becomes the next run's "WHERE YOU LEFT OFF".
   const filesChanged = result.changedFiles || [];
   try {
     await sb.addWorklog({
-      project_id: project.id, kind: 'action', created_by: 'agent',
-      summary: `Agent run: ${result.steps} steps, ${result.proposals.length} proposal(s), ${result.artifacts.length} artifact(s)${filesChanged.length ? `, ${filesChanged.length} file(s) changed` : ''}`,
-      detail: { summary: result.summary, proposals: result.proposals, artifacts: result.artifacts, changedFiles: filesChanged }
+      project_id: project.id, kind: 'progress', created_by: 'agent',
+      summary: (result.summary || 'Run complete').split('\n')[0].slice(0, 200),
+      detail: {
+        summary: result.summary,
+        proposals: result.proposals,
+        artifacts: result.artifacts,
+        changedFiles: filesChanged,
+        committed: Boolean(result.committed),
+        criteriaAdvanced: result.criteriaAdvanced || ''
+      }
     });
   } catch { /* best effort */ }
 
@@ -211,6 +279,7 @@ async function main() {
   if (args.force) config.force = true;
   if (args.forceLocal) config.forceLocal = true;
   if (args.forceCloud) config.forceCloud = true;
+  if (args.spec) config.forceSpec = true;
 
   const missing = validate(config);
   if (missing.length) {
@@ -237,8 +306,8 @@ async function main() {
     chain = [localLink];
   } else if (config.forceCloud) {
     chain = [...cloudLinks, localLink];
-  } else if (goalNeedsCloud(args.goal)) {
-    chain = [...cloudLinks, localLink];     // code task → cloud first
+  } else if (goalNeedsCloud(args.goal) || args.spec) {
+    chain = [...cloudLinks, localLink];     // code task / spec draft → cloud first
   } else {
     chain = [localLink, ...cloudLinks];     // routine → local first
   }

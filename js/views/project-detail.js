@@ -88,6 +88,7 @@ Views.ProjectDetail = (() => {
         </div>
       </div>
 
+      ${_renderSpecSection(project)}
       ${_renderTrackerSection(project)}
       ${_renderSessionsSection(project, isTimerRunning)}
       ${_renderAdvisorSection(project)}
@@ -110,6 +111,7 @@ Views.ProjectDetail = (() => {
     // project's context and the agent journal inline without a Load click, so the
     // info the agent referenced/produced is always visible.
     _stopRunPoll();
+    loadSpec(id);
     loadRun(id);
     loadContext(id);
     loadWorklog(id);
@@ -253,6 +255,20 @@ Views.ProjectDetail = (() => {
       </div>`;
   }
 
+  // The project SPEC — goal + requirements + success criteria, the agent's north star.
+  // Hidden until a spec exists; filled by loadSpec() from project_context.
+  function _renderSpecSection(project) {
+    return `
+      <div class="section-card" id="spec-section-${project.id}" style="display:none;">
+        <div class="section-header">
+          <span class="section-title">🎯 Spec</span>
+          <button class="btn btn-sm" id="spec-reload-${project.id}"
+            onclick="Views.ProjectDetail.loadSpec('${project.id}')">↻</button>
+        </div>
+        <div id="spec-body-${project.id}"></div>
+      </div>`;
+  }
+
   /* ── Agent progress tracker (Domino's-style) ── */
 
   const _STAGES = [
@@ -323,7 +339,7 @@ Views.ProjectDetail = (() => {
   /* ── Project context / knowledge ── */
 
   function _renderContextSection(project) {
-    const kinds = ['note', 'requirement', 'decision', 'history', 'instruction', 'goal', 'constraint'];
+    const kinds = ['note', 'goal', 'requirement', 'success_criteria', 'constraint', 'decision', 'history', 'instruction'];
     return `
       <div class="section-card">
         <div class="section-header">
@@ -573,7 +589,7 @@ Views.ProjectDetail = (() => {
     if (!ok) { list.innerHTML = '<p style="color:var(--c-blocked);font-size:0.85rem;">Could not load worklog.</p>'; return; }
     if (!entries.length) { list.innerHTML = '<p style="color:var(--text-2);font-size:0.85rem;">No entries yet.</p>'; return; }
 
-    const icon = { proposal: '💡', action: '✓', observation: '👁', note: '•' };
+    const icon = { proposal: '💡', action: '✓', observation: '👁', note: '•', progress: '📈' };
     list.innerHTML = entries.map(e => `
       <div class="history-item">
         <div class="history-content">
@@ -657,6 +673,41 @@ Views.ProjectDetail = (() => {
 
   /* ── Project context / knowledge: load + save ── */
 
+  // Pull context, partition the spec kinds, and render the Spec card. Hidden if no spec.
+  const _SPEC_KINDS = ['goal', 'requirement', 'success_criteria', 'constraint'];
+  async function loadSpec(projectId) {
+    const section = document.getElementById(`spec-section-${projectId}`);
+    const body    = document.getElementById(`spec-body-${projectId}`);
+    if (!body) return;
+
+    let res;
+    try { res = await Sync.pullContext(projectId); }
+    catch { if (section) section.style.display = 'none'; return; }
+
+    const rows = (res && res.entries) || [];
+    const by = { goal: [], requirement: [], success_criteria: [], constraint: [] };
+    rows.forEach(r => { if (by[r.kind]) by[r.kind].push((r.content || '').trim()); });
+    const uniq = a => [...new Set(a.filter(Boolean))];
+    const goal = by.goal[0] || '';                          // newest goal (rows are desc)
+    const reqs = uniq(by.requirement.slice().reverse());
+    const crit = uniq(by.success_criteria.slice().reverse());
+    const cons = uniq(by.constraint.slice().reverse());
+
+    if (!goal && !crit.length) { if (section) section.style.display = 'none'; return; }
+
+    const block = (label, arr, ordered) => {
+      if (!arr.length) return '';
+      const tag = ordered ? 'ol' : 'ul';
+      return `<div class="spec-block"><div class="spec-label">${label}</div><${tag} class="spec-list">${arr.map(x => `<li>${Models.escapeHtml(x)}</li>`).join('')}</${tag}></div>`;
+    };
+    body.innerHTML =
+      (goal ? `<div class="spec-block"><div class="spec-label">Goal</div><div class="spec-goal">${Models.escapeHtml(goal)}</div></div>` : '') +
+      block('Requirements', reqs, false) +
+      block('Success criteria', crit, true) +
+      block('Constraints', cons, false);
+    if (section) section.style.display = '';
+  }
+
   async function loadContext(projectId) {
     const list = document.getElementById(`context-list-${projectId}`);
     const btn  = document.getElementById(`context-load-${projectId}`);
@@ -731,6 +782,6 @@ Views.ProjectDetail = (() => {
   return {
     render, toggleStatusMenu, changeStatus, deleteSession, addLink, deleteLink,
     addTask, toggleTask, deleteTask, requestAdvice, decideProposal, loadWorklog,
-    loadRun, loadContext, saveContext, loadErrorLog
+    loadRun, loadContext, saveContext, loadErrorLog, loadSpec
   };
 })();
