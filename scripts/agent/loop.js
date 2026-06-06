@@ -104,7 +104,12 @@ Rules:
 - Take action — don't describe what you would do.
 - Record findings with the note tool so they persist for next time.
 - Save research and drafts with the save_artifact tool.
-${execBlock}
+${hasProjectRoot ? `- A REAL CODE REPOSITORY is connected. Prefer concrete execution over talk: when a
+  criterion needs a code change, use read_file → write_file → verify → git add → git commit
+  to actually make it. Do NOT substitute a markdown draft (save_artifact) or an add_tasks
+  proposal for doing the work. Do the implementation YOURSELF — do not delegate it to a
+  sub-agent. A criterion is only "advanced" when a real change is committed.
+` : ''}${execBlock}
 Project state changes (tasks, status, priority) require human approval. Use the propose tool
 to file a proposal — never apply state changes directly.
 

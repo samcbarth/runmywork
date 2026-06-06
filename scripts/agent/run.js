@@ -183,7 +183,13 @@ async function runForProject(services, project, goalOverride, budgetOverride) {
     const descHint = (!project.summary && !project.description)
       ? '\nAlso: this project has no summary or description yet. After researching the project, use propose with action "update_description" to set a one-sentence summary (shown on the card) and a fuller description.'
       : '';
-    goal = `Advance this project toward its success criteria. Pick the next UNMET criterion and do real, concrete work toward it — research, draft, build a deliverable, edit code, or propose the change. In your done summary, state which criterion you advanced and whether it is now met.${descHint}\nSuccess criteria:\n${list}`;
+    // When a real repo is connected, demand actual execution — editing files and
+    // committing — not a written plan. Drafting a markdown plan or only proposing
+    // tasks does NOT count as advancing a criterion.
+    const execDemand = config.projectRoot
+      ? ` This project has a real code repository connected. To advance a criterion you MUST take concrete action with the execution tools: read_file to inspect, write_file to make the actual change, verify to check it, then git add + git commit. Do the work YOURSELF — do not delegate the implementation, and do not stop after only drafting a plan or proposing tasks. Writing a markdown plan or filing an add_tasks proposal is NOT advancing a criterion; only a real committed code change is.`
+      : '';
+    goal = `Advance this project toward its success criteria. Pick the next UNMET criterion and do real, concrete work toward it.${execDemand} In your done summary, state which criterion you advanced and whether it is now met.${descHint}\nSuccess criteria:\n${list}`;
   } else {
     const openTasks = (project.tasks || []).filter(t => !t.done).map(t => t.text);
     const focus = openTasks.length ? ` Prioritise the open tasks: ${openTasks.slice(0, 5).join('; ')}.` : '';

@@ -9,7 +9,14 @@
  * and journal entries directly.
  */
 
-const RESTRICTED = ['web_search', 'fetch_url', 'files', 'note', 'save_artifact', 'propose', 'done', 'shell'];
+// Tools a sub-agent may use. Includes the execution tools (read_file, write_file,
+// git, etc.) so a delegated "implement X" sub-task can ACTUALLY edit code + commit,
+// not just draft a plan. Filtered against what's enabled at runtime, so a tool the
+// parent doesn't have (e.g. write_file when file-write is off) is simply absent.
+const RESTRICTED = [
+  'web_search', 'fetch_url', 'files', 'note', 'save_artifact', 'propose', 'done',
+  'shell', 'read_file', 'find_in_file', 'write_file', 'git', 'verify', 'github'
+];
 
 module.exports = {
   name: 'delegate',
@@ -49,13 +56,19 @@ module.exports = {
     ctx.proposals.push(...result.proposals);
     ctx.artifacts.push(...result.artifacts);
     ctx.findings.push(...result.findings);
+    // bubble real execution up so the parent's summary, reality-check, and
+    // done-gate see the files the child wrote / commits it made.
+    ctx.changedFiles.push(...(result.changedFiles || []));
+    if (result.committed) ctx.committed = true;
 
     return {
       ok: true,
       sub_summary: result.summary,
       steps: result.steps,
       proposals: result.proposals.length,
-      artifacts: result.artifacts.length
+      artifacts: result.artifacts.length,
+      filesChanged: (result.changedFiles || []).map(f => f.path),
+      committed: Boolean(result.committed)
     };
   }
 };

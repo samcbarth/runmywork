@@ -81,6 +81,7 @@ jobs:
           AGENT_ALLOW_FILE_WRITE:    '1'
           AGENT_ALLOW_GIT_WRITE:     '1'
           AGENT_ALLOW_GIT_PUSH:      '0'   # workflow handles the push below
+          AGENT_BUDGET:              '24'  # room for real code work: read→write→verify→commit
         run: node scripts/agent/run.js ${{ steps.flags.outputs.flags }}
 
       # If the agent committed anything, push the branch and open a PR.
