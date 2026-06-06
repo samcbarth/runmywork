@@ -45,6 +45,31 @@ function parseArgs(argv) {
 
 function log(...args) { console.log('[agent]', ...args); }
 
+// Build a compact two-level file tree from the project root so the model
+// knows exactly which paths exist before attempting any reads or writes.
+function buildFileTree(root) {
+  const fs   = require('fs');
+  const path = require('path');
+  const SKIP = new Set(['.git', 'node_modules', 'work', '.next', 'dist', 'build', '__pycache__']);
+  const lines = [`PROJECT FILE TREE (${root}):`];
+  function walk(dir, depth) {
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      if (SKIP.has(e.name) || e.name.startsWith('.') && e.name !== '.gitignore') continue;
+      const indent = '  '.repeat(depth);
+      if (e.isDirectory()) {
+        lines.push(`${indent}${e.name}/`);
+        if (depth < 2) walk(path.join(dir, e.name), depth + 1);
+      } else {
+        lines.push(`${indent}${e.name}`);
+      }
+    }
+  }
+  walk(root, 0);
+  return lines.join('\n');
+}
+
 function needsAgent(p, force) {
   if (p.status === 'done' || p.status === 'archived') return false;
   if (force) return true;
@@ -94,11 +119,19 @@ async function runForProject(services, project, goalOverride, budgetOverride) {
 
   const contextText = await buildMemory(sb, project.id);
 
+  // Inject real file tree so the model never guesses paths.
+  // Prevents hallucinated filenames like "sync.js" when the real file is "js/store.js".
+  let fileTree = '';
+  if (services.config.projectRoot) {
+    try { fileTree = buildFileTree(services.config.projectRoot); } catch { /* best effort */ }
+  }
+
   log(`▶ ${project.title}  [${project.status}]`);
   log(`   goal: ${goal.slice(0, 100)}`);
 
   const result = await runLoop({
-    services, project, goal, contextText,
+    services, project, goal,
+    contextText: fileTree ? `${contextText}\n\n${fileTree}`.trim() : contextText,
     budget: budgetOverride || services.config.budget
   });
 

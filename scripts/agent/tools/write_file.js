@@ -70,6 +70,12 @@ module.exports = {
 
       switch (op) {
         case 'write': {
+          // Warn if this looks like a hallucinated path (parent dir doesn't exist in root)
+          const parentExists = fs.existsSync(path.dirname(target));
+          if (!parentExists) {
+            const hint = _nearbyFiles(root, args.path);
+            return { error: `Parent directory does not exist for "${args.path}". Did you mean one of: ${hint}? Use read_file op:"list" to verify paths.` };
+          }
           const content = String(args.content ?? '');
           fs.writeFileSync(target, content, 'utf8');
           _trackChange(ctx, args.path, op, args.reason);
@@ -87,7 +93,10 @@ module.exports = {
           if (old_string == null || new_string == null) {
             return { error: 'patch requires old_string and new_string.' };
           }
-          if (!fs.existsSync(target)) return { error: `File not found: ${args.path}` };
+          if (!fs.existsSync(target)) {
+            const hint = _nearbyFiles(root, args.path);
+            return { error: `File not found: "${args.path}". Did you mean one of: ${hint}? Use read_file op:"list" to verify exact paths before patching.` };
+          }
           const original = fs.readFileSync(target, 'utf8');
           if (!original.includes(old_string)) {
             return { error: `old_string not found in ${args.path}. Read the file first to get the exact text.` };
@@ -109,6 +118,31 @@ module.exports = {
     }
   }
 };
+
+// Find files with similar names to help the model self-correct hallucinated paths.
+function _nearbyFiles(root, badPath) {
+  try {
+    const path = require('path');
+    const fs   = require('fs');
+    const name = path.basename(badPath).toLowerCase();
+    const results = [];
+    function walk(dir, depth) {
+      if (depth > 3) return;
+      let entries;
+      try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+      for (const e of entries) {
+        if (['.git','node_modules','work'].includes(e.name)) continue;
+        const full = path.join(dir, e.name);
+        if (e.isDirectory()) walk(full, depth + 1);
+        else if (e.name.toLowerCase().includes(name) || name.includes(e.name.toLowerCase())) {
+          results.push(path.relative(root, full).replace(/\\/g, '/'));
+        }
+      }
+    }
+    walk(root, 0);
+    return results.length ? results.slice(0, 5).join(', ') : '(no similar files found — use read_file op:"list" to explore)';
+  } catch { return '(unknown)'; }
+}
 
 function _trackChange(ctx, filePath, op, reason) {
   if (!ctx.changedFiles) ctx.changedFiles = [];
