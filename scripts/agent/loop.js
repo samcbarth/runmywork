@@ -35,14 +35,18 @@ function trunc(s, n) { s = String(s || ''); return s.length > n ? s.slice(0, n -
 function describeCall(name, args) {
   const a = args || {};
   switch (name) {
-    case 'web_search':   return `searched: ${trunc(a.query, 60)}`;
-    case 'fetch_url':    return `read: ${trunc(a.url, 70)}`;
-    case 'files':        return `file ${a.op || ''} ${trunc(a.path, 40)}`.trim();
-    case 'save_artifact':return `saved: ${trunc(a.filename || a.summary, 50)}`;
-    case 'propose':      return `proposed: ${a.action || ''}`.trim();
-    case 'note':         return `noted: ${trunc(a.summary, 60)}`;
-    case 'delegate':     return `delegated: ${trunc(a.goal, 55)}`;
-    case 'done':         return 'finished';
+    case 'web_search':    return `searched: ${trunc(a.query, 60)}`;
+    case 'fetch_url':     return `read: ${trunc(a.url, 70)}`;
+    case 'files':         return `file ${a.op || ''} ${trunc(a.path, 40)}`.trim();
+    case 'read_file':     return `read: ${trunc(a.path, 50)} (${a.op || 'read'})`;
+    case 'find_in_file':  return `found: ${trunc(a.search, 40)} in ${trunc(a.path, 30)}`;
+    case 'write_file':    return `wrote: ${trunc(a.path, 45)} (${a.op || 'patch'})`;
+    case 'git':           return `git ${a.op || ''}${a.message ? `: ${trunc(a.message, 40)}` : ''}`;
+    case 'save_artifact': return `saved: ${trunc(a.filename || a.summary, 50)}`;
+    case 'propose':       return `proposed: ${a.action || ''}`.trim();
+    case 'note':          return `noted: ${trunc(a.summary, 60)}`;
+    case 'delegate':      return `delegated: ${trunc(a.goal, 55)}`;
+    case 'done':          return 'finished';
     default:             return name;
   }
 }
@@ -73,12 +77,13 @@ function systemPrompt(project, config) {
 
   const execBlock = hasProjectRoot ? `
 REAL PROJECT FILES ARE ACCESSIBLE. Execution rules (strict):
-1. Read the file before writing it. Always.
-2. Use the read_file tool with op list to confirm a path exists before patching it.
-3. Use the write_file tool with op patch (surgical replace) not op write (full overwrite).
-4. If write_file returns "File not found", use read_file op list to find the correct path.
-5. After writing, use the git tool op add then git op commit with a clear message.
-6. Never commit .env files or secrets.
+1. Use read_file op list to confirm the exact path before touching any file.
+2. Use read_file op read to see the file content.
+3. Use find_in_file to get the EXACT text block you want to replace — never type old_string from memory.
+4. Use write_file op patch with the exact_match from find_in_file as old_string.
+5. If write_file returns "old_string not found", call find_in_file again with a different search term.
+6. After writing, use git op add then git op commit with a clear message describing what changed.
+7. Never commit .env files or secrets.
 ` : '';
 
   // Groq/llama models misfire into XML hermes format when the system prompt quotes
