@@ -1,6 +1,6 @@
 const App = (() => {
   // Bumped on each deploy so you can confirm which build is live (shown in Settings).
-  const BUILD = '2026-06-07 · testingsite + target_repo + live-site button';
+  const BUILD = '2026-06-07 · instant render + testingsite routing';
 
   let _timerInterval = null;
   let _swRegistration = null;
@@ -367,6 +367,10 @@ const App = (() => {
     _registerSW();
     setTimeout(() => Notifications.checkOnOpen(), 1500);
 
+    // Render immediately from cache so mobile doesn't show a blank screen while
+    // the network pull is in flight. A second render after pull refreshes the data.
+    _handleRoute();
+
     // Always pull from Supabase — zero-setup, every device stays in sync.
     showSyncStatus('pulling');
     const result = await Sync.pull();
@@ -376,6 +380,9 @@ const App = (() => {
     Views.Approvals.autoApplyPending();          // silently apply any auto-approve policies
     Views.Approvals.notifyCriterionReview();     // notify if criterion proposals are pending
 
+    // Re-render with fresh data from Supabase.
+    _handleRoute();
+
     // Kick off a GitHub Actions run (20-min cooldown) and keep the header chip ticking.
     Sync.triggerAgent().then(res => {
       if (res.triggered) _agentRunUntil = Date.now() + 120000;
@@ -384,8 +391,6 @@ const App = (() => {
     });
     _startAgentChipTicker();
     _startRunWatch();   // notify on agent run start / completion (any page)
-
-    _handleRoute();
   }
 
   document.addEventListener('DOMContentLoaded', init);
