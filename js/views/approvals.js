@@ -1,5 +1,11 @@
 Views.Approvals = (() => {
 
+  /* Capitalised label for an action-mode id (e.g. "implementation" → "Implementation"). */
+  function _modeLabel(m) {
+    const s = String(m || '').replace(/_/g, ' ').trim();
+    return s ? s.charAt(0).toUpperCase() + s.slice(1) : 'write';
+  }
+
   /* Human-readable one-liner for a proposal's payload. */
   function _summary(a) {
     const p = a.payload || {};
@@ -12,6 +18,7 @@ Views.Approvals = (() => {
       case 'update_description':  return 'Update project description & summary';
       case 'mark_criterion_done': return `Criterion done: "${(p.criterion || '').slice(0, 60)}"`;
       case 'mark_task_done':      return `Mark task done: "${(p.task_text || '').slice(0, 60)}"`;
+      case 'authorize_mode':      return `Authorize ${_modeLabel(p.mode)} phase (agent will modify files)`;
       default:                    return a.action_type;
     }
   }
@@ -41,6 +48,12 @@ Views.Approvals = (() => {
       return [
         p.task_text ? `<p class="approval-detail-note"><strong>Task:</strong> ${Models.escapeHtml(p.task_text)}</p>` : '',
         p.note      ? `<div class="approval-detail-note"><strong>What was done:</strong><div class="worklog-detail" style="margin-top:4px;">${Models.escapeHtml(p.note)}</div></div>` : ''
+      ].filter(Boolean).join('');
+    }
+    if (a.action_type === 'authorize_mode') {
+      return [
+        `<p class="approval-detail-note">Approving lets the agent enter the <strong>${_modeLabel(p.mode)}</strong> phase and modify project files. One approval covers the whole write phase (implementation → validation → revision → deployment) until the next plan.</p>`,
+        p.plan ? `<div class="approval-detail-note"><strong>Plan:</strong><div class="worklog-detail" style="margin-top:4px;">${Models.escapeHtml(p.plan)}</div></div>` : ''
       ].filter(Boolean).join('');
     }
     if (a.action_type === 'set_spec') {
@@ -188,6 +201,17 @@ Views.Approvals = (() => {
         if (!target) return false;   // task not found — don't silently swallow
         target.done = true;
         break;
+      }
+      case 'authorize_mode': {
+        if (!p.mode) return false;
+        // The token the agent runtime reads (supabase.modeAuthorization): a worklog
+        // row of kind 'mode_authorized'. Valid until the next planning run.
+        Sync.addWorklog({
+          project_id: a.project_id, kind: 'mode_authorized', created_by: 'user',
+          summary: `Authorized ${_modeLabel(p.mode)} phase`,
+          detail: { mode: p.mode, plan: p.plan || '' }
+        });
+        return true;   // worklog written directly; no project mutation
       }
       default:
         return false;

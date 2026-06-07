@@ -14,6 +14,7 @@
 
 const STATUSES = ['active', 'blocked', 'idle', 'done'];
 const PRIORITIES = ['low', 'medium', 'high'];
+const WRITE_MODES = ['implementation', 'revision', 'deployment'];
 
 function buildPayload(action, args) {
   switch (action) {
@@ -74,8 +75,15 @@ function buildPayload(action, args) {
         note:      String(args.note || '').trim().slice(0, 400)
       };
     }
+    case 'authorize_mode': {
+      const mode = String(args.mode || '').toLowerCase().trim();
+      if (!WRITE_MODES.includes(mode)) throw new Error(`authorize_mode "mode" must be one of ${WRITE_MODES.join('|')}`);
+      const plan = String(args.plan || '').trim();
+      if (!plan) throw new Error('authorize_mode needs a "plan" describing what the write phase will change');
+      return { mode, plan: plan.slice(0, 1200) };
+    }
     default:
-      throw new Error(`unknown action "${action}". Use add_tasks | set_status | set_priority | add_link | set_spec | update_description | mark_criterion_done | mark_task_done`);
+      throw new Error(`unknown action "${action}". Use add_tasks | set_status | set_priority | add_link | set_spec | update_description | mark_criterion_done | mark_task_done | authorize_mode`);
   }
 }
 
@@ -92,17 +100,18 @@ function alreadyPending(pending, action, payload) {
     if (action === 'update_description') return true; // one pending description update at a time
     if (action === 'mark_criterion_done') return p.criterion === payload.criterion; // dedupe by criterion text
     if (action === 'mark_task_done') return p.task_text === payload.task_text; // dedupe by task text
+    if (action === 'authorize_mode') return p.mode === payload.mode; // one pending authorization per write mode
     return false;
   });
 }
 
 module.exports = {
   name: 'propose',
-  description: 'Propose a change to the project that the human approves in the app. This is the ONLY way to change tracked state. action is one of: add_tasks (args.tasks: string[]), set_status (args.status: active|blocked|idle|done), set_priority (args.priority: low|medium|high), add_link (args.url, args.label), set_spec (args.goal, args.requirements[], args.successCriteria[], args.constraints[] — defines the project goal + measurable success criteria), update_description (args.description: full description, args.summary: 1-2 sentence tagline for cards — updates how the project describes itself), mark_criterion_done (args.criterion: exact criterion text, args.evidence: what you did to meet it — file a completion claim for a success criterion), mark_task_done (args.task_text: exact text of an open task you finished, args.note: what you did — marks that task complete). Always include a clear rationale.',
+  description: 'Propose a change to the project that the human approves in the app. This is the ONLY way to change tracked state. action is one of: add_tasks (args.tasks: string[]), set_status (args.status: active|blocked|idle|done), set_priority (args.priority: low|medium|high), add_link (args.url, args.label), set_spec (args.goal, args.requirements[], args.successCriteria[], args.constraints[] — defines the project goal + measurable success criteria), update_description (args.description: full description, args.summary: 1-2 sentence tagline for cards — updates how the project describes itself), mark_criterion_done (args.criterion: exact criterion text, args.evidence: what you did to meet it — file a completion claim for a success criterion), mark_task_done (args.task_text: exact text of an open task you finished, args.note: what you did — marks that task complete), authorize_mode (args.mode: implementation|revision|deployment, args.plan: plain-language description of what the write phase will change — asks the human to authorize the agent to start modifying project assets). Always include a clear rationale.',
   parameters: {
     type: 'object',
     properties: {
-      action: { type: 'string', enum: ['add_tasks', 'set_status', 'set_priority', 'add_link', 'set_spec', 'update_description', 'mark_criterion_done', 'mark_task_done'] },
+      action: { type: 'string', enum: ['add_tasks', 'set_status', 'set_priority', 'add_link', 'set_spec', 'update_description', 'mark_criterion_done', 'mark_task_done', 'authorize_mode'] },
       rationale: { type: 'string', description: 'Why this change — shown to the human in the approval.' },
       tasks: { type: 'array', items: { type: 'string' }, description: 'For add_tasks.' },
       status: { type: 'string', description: 'For set_status.' },
@@ -119,6 +128,8 @@ module.exports = {
       criterion: { type: 'string', description: 'For mark_criterion_done: exact text of the success criterion being claimed done.' },
       evidence: { type: 'string', description: 'For mark_criterion_done: what was done/found to meet this criterion.' },
       task_text: { type: 'string', description: 'For mark_task_done: exact text of the open task you completed.' },
+      mode: { type: 'string', description: 'For authorize_mode: the write phase to authorize (implementation|revision|deployment).' },
+      plan: { type: 'string', description: 'For authorize_mode: plain-language plan of exactly what the write phase will change.' },
       project_id: { type: 'string', description: 'Board-planner mode only: which project to target. Omit when working a single project.' }
     },
     required: ['action', 'rationale']
@@ -162,6 +173,7 @@ module.exports = {
       : action === 'update_description' ? `update description/summary`
       : action === 'mark_criterion_done' ? `criterion done: "${(payload.criterion || '').slice(0, 50)}"`
       : action === 'mark_task_done' ? `task done: "${(payload.task_text || '').slice(0, 50)}"`
+      : action === 'authorize_mode' ? `authorize ${payload.mode} phase`
       : `link ${payload.label}`;
     ctx.proposals.push(desc);
     return { ok: true, proposed: desc, note: 'Filed for human approval in the app inbox.' };

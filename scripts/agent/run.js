@@ -27,6 +27,7 @@ const { makeSupabase } = require('./supabase');
 const { makeOllama } = require('./ollama');
 const { makeGroq, makeOpenRouter, makeOpenAI, makeChainedProvider } = require('./groq');
 const { runLoop } = require('./loop');
+const { getMode, isWrite, defaultStartMode } = require('./modes');
 
 function parseArgs(argv) {
   const a = { _: [] };
@@ -41,6 +42,7 @@ function parseArgs(argv) {
     else if (t === '--spec')  a.spec = true;         // force a spec-draft run
     else if (t === '--project') a.project = argv[++i];
     else if (t === '--goal') a.goal = argv[++i];
+    else if (t === '--mode') a.mode = argv[++i];     // force a specific action mode
     else if (t === '--budget') a.budget = parseInt(argv[++i], 10);
     else a._.push(t);
   }
@@ -162,39 +164,70 @@ async function buildContext(sb, projectId) {
   return { text: blocks.join('\n\n'), spec };
 }
 
-async function runForProject(services, project, goalOverride, budgetOverride) {
+// Choose the action mode for this run: explicit override → last run's recommended
+// next_mode → default start mode for a fresh objective.
+async function pickMode(sb, project, spec, override) {
+  if (override && getMode(override)) return override;
+  let last = null;
+  try { last = await sb.latestRun(project.id); } catch { /* best effort */ }
+  if (last && last.next_mode && getMode(last.next_mode)) return last.next_mode;
+  return defaultStartMode(spec);
+}
+
+// Build the goal for a moded run: the mode's directive leads, then the spec /
+// criteria / open tasks give it something concrete to work on.
+function buildModeGoal(mode, spec, project, config) {
+  const parts = [mode.goalFragment];
+  if (spec.criteria && spec.criteria.length) {
+    parts.push('Success criteria:\n' + spec.criteria.map((c, i) => `  ${i + 1}. ${c}`).join('\n'));
+  }
+  const openTasks = (project.tasks || []).filter(t => !t.done).map(t => t.text);
+  if (openTasks.length) parts.push(`Open tasks: ${openTasks.slice(0, 6).join('; ')}`);
+  if ((mode.id === 'planning' || mode.id === 'discovery') && !project.summary && !project.description) {
+    parts.push('This project has no summary/description yet — propose update_description (summary + description) as part of the plan.');
+  }
+  return parts.join('\n\n');
+}
+
+async function runForProject(services, project, goalOverride, budgetOverride, modeOverride) {
   const { sb, config } = services;
   const { text: memoryText, spec } = await buildContext(sb, project.id);
 
-  // Goal framing, in priority order (Component 3):
-  //   1. explicit --goal override
-  //   2. no spec yet (or --spec) → SPEC MODE: research + propose a set_spec
-  //   3. spec with success criteria → advance the next unmet criterion
-  //   4. spec/goal but no criteria → open-task fallback
-  let goal;
-  let specMode = false;
-  if (goalOverride) {
-    goal = goalOverride;
-  } else if (config.forceSpec || !spec.hasGoal) {
-    specMode = true;
-    goal = `This project has no clear spec yet. Research it — read the project context, tasks, and any linked code or files — then call the propose tool with action "set_spec" to define: a one-sentence goal, the key requirements, and 3-6 measurable, checkable success criteria that mean the project is "done". Do this BEFORE any other work, and finish once the spec proposal is filed.`;
-  } else if (spec.criteria.length) {
-    const list = spec.criteria.map((c, i) => `  ${i + 1}. ${c}`).join('\n');
-    const descHint = (!project.summary && !project.description)
-      ? '\nAlso: this project has no summary or description yet. After researching the project, use propose with action "update_description" to set a one-sentence summary (shown on the card) and a fuller description.'
-      : '';
-    // When a real repo is connected, demand actual execution — editing files and
-    // committing — not a written plan. Drafting a markdown plan or only proposing
-    // tasks does NOT count as advancing a criterion.
-    const execDemand = config.projectRoot
-      ? ` This project has a real code repository connected. To advance a criterion you MUST take concrete action with the execution tools: read_file to inspect, write_file to make the actual change, verify to check it, then git add + git commit. Do the work YOURSELF — do not delegate the implementation, and do not stop after only drafting a plan or proposing tasks. Writing a markdown plan or filing an add_tasks proposal is NOT advancing a criterion; only a real committed code change is.`
-      : '';
-    goal = `Advance this project toward its success criteria. Pick the next UNMET criterion and do real, concrete work toward it.${execDemand} In your done summary, state which criterion you advanced and whether it is now met.${descHint}\nSuccess criteria:\n${list}`;
-  } else {
-    const openTasks = (project.tasks || []).filter(t => !t.done).map(t => t.text);
-    const focus = openTasks.length ? ` Prioritise the open tasks: ${openTasks.slice(0, 5).join('; ')}.` : '';
-    goal = `Make concrete, useful progress on "${project.title}".${focus} Produce something real — don't just plan. Do not re-investigate things already marked done.`;
+  // Resolve the single action mode for this run. An explicit --goal bypasses the
+  // mode system (legacy ad-hoc run); everything else runs inside one mode.
+  let mode = null;
+  if (!goalOverride) {
+    const modeId = await pickMode(sb, project, spec, modeOverride);
+    mode = getMode(modeId);
   }
+
+  // Write gate: a write mode (implementation/revision/deployment) may only run
+  // with a valid human authorization. Without it, record a short "paused" run so
+  // the UI shows the wait, and bail before doing any work.
+  if (mode && isWrite(mode.id)) {
+    let auth = { authorized: false };
+    try { auth = await sb.modeAuthorization(project.id); } catch { /* treat as unauthorized */ }
+    if (!auth.authorized) {
+      log(`▶ ${project.title} — ${mode.label} pending your approval; skipping.`);
+      try {
+        const run = await sb.createRun(project.id, mode.id);
+        if (run) {
+          await sb.updateRun(run.id, {
+            status: 'done', stage: 'planning', percent: 0,
+            summary: `${mode.label} is pending your approval. Approve the "${mode.label} phase" authorization in the inbox to start the write phase.`,
+            ended_at: Date.now()
+          });
+          // Separate patch (see loop.js) so a missing next_mode column can't drop the above.
+          try { await sb.updateRun(run.id, { next_mode: mode.id }); } catch { /* pre-migration */ }
+        }
+      } catch { /* tracker best-effort */ }
+      return { skipped: true, reason: 'pending_approval', mode: mode.id };
+    }
+  }
+
+  // Goal framing: explicit override, else mode-driven goal.
+  const goal = goalOverride || buildModeGoal(mode, spec, project, config);
+  const specMode = false;
 
   const contextText = memoryText;
 
@@ -207,11 +240,13 @@ async function runForProject(services, project, goalOverride, budgetOverride) {
     try { fileTree = buildFileTree(services.config.projectRoot, depth); } catch { /* best effort */ }
   }
 
-  log(`▶ ${project.title}  [${project.status}]${specMode ? '  (spec mode)' : ''}`);
+  log(`▶ ${project.title}  [${project.status}]${mode ? `  mode: ${mode.label}` : ''}`);
   log(`   goal: ${goal.slice(0, 100)}`);
 
   const result = await runLoop({
     services, project, goal,
+    mode,
+    allowList: mode ? mode.allowList : undefined,
     contextText: fileTree ? `${contextText}\n\n${fileTree}`.trim() : contextText,
     budget: budgetOverride || services.config.budget
   });
@@ -316,8 +351,8 @@ async function main() {
     chain = [localLink];
   } else if (config.forceCloud) {
     chain = [...cloudLinks, localLink];
-  } else if (goalNeedsCloud(args.goal) || args.spec) {
-    chain = [...cloudLinks, localLink];     // code task / spec draft → cloud first
+  } else if (goalNeedsCloud(args.goal) || args.spec || args.mode === 'implementation' || args.mode === 'revision') {
+    chain = [...cloudLinks, localLink];     // code task / spec draft / write mode → cloud first
   } else {
     chain = [localLink, ...cloudLinks];     // routine → local first
   }
@@ -385,7 +420,7 @@ async function main() {
 
   for (const project of targets) {
     try {
-      const result = await runForProject(services, project, args.project ? args.goal : undefined, args.budget);
+      const result = await runForProject(services, project, args.project ? args.goal : undefined, args.budget, args.mode);
       if (result && result.committed) {
         handoff.committed = true;
         // Per-run objects so deploy-verify can file a criterion-review proposal

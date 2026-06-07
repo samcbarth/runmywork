@@ -34,6 +34,22 @@ on:
         description: 'External repo to work on (e.g. samcbarth/testingsite). Blank = this repo.'
         required: false
         default: ''
+      action_mode:
+        description: 'Force a specific action mode (blank = auto-derive from the last run).'
+        required: false
+        default: ''
+        type: choice
+        options:
+          - ''
+          - discovery
+          - analysis
+          - planning
+          - approval_request
+          - implementation
+          - validation
+          - revision
+          - deployment
+          - reporting
 
 # contents: push agent commits to main. pages + id-token: deploy to GitHub Pages
 # from THIS workflow (a push made with the default GITHUB_TOKEN does NOT trigger
@@ -104,6 +120,7 @@ jobs:
           [ "${{ inputs.mode }}" = "all" ]   && FLAGS="$FLAGS --all"
           [ "${{ inputs.mode }}" = "plan" ]  && FLAGS="$FLAGS --plan"
           [ "${{ inputs.mode }}" = "force" ] && FLAGS="$FLAGS --force"
+          [ -n "${{ inputs.action_mode }}" ] && FLAGS="$FLAGS --mode ${{ inputs.action_mode }}"
           echo "flags=$FLAGS" >> "$GITHUB_OUTPUT"
 
       - name: Run agent

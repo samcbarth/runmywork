@@ -584,6 +584,7 @@ const Sync = (() => {
       if (opts.projectId)  payload.project_id  = opts.projectId;
       if (opts.force)      payload.mode        = 'force';
       if (opts.targetRepo) payload.target_repo = opts.targetRepo;
+      if (opts.actionMode) payload.action_mode = opts.actionMode;   // force a specific action mode
       const res = await fetch(`${SUPABASE_URL}/functions/v1/trigger-agent`, {
         method: 'POST',
         headers: {

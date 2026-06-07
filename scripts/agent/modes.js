@@ -1,0 +1,190 @@
+'use strict';
+
+/*
+ * Agent action modes.
+ * -------------------
+ * Every run executes EXACTLY ONE mode. The mode decides three things:
+ *   1. which tools the agent can even see  (allowList → registry.loadTools)
+ *   2. how its goal is framed              (goalFragment, prepended in run.js)
+ *   3. what it must hand off next          (nextMode, recommended by `done`)
+ *
+ * Modes are classed read | write. Read modes auto-chain run-to-run. Write modes
+ * (implementation / revision / deployment) modify project assets and require a
+ * single human approval (an `authorize_mode` proposal) before the write phase
+ * begins — see run.js gating + tools/propose.js.
+ *
+ * Tool-gating needs no special plumbing: loadTools(config, allowList) already
+ * filters by tool name and runLoop forwards opts.allowList. A mode just lists the
+ * tool names it permits. `stage` and `done` are included everywhere (the loop
+ * relies on done; stage is harmless). Tools gated by env (shell/github/etc.) are
+ * still dropped by their own enabled() check even if listed here.
+ */
+
+// Read-only tool surface shared by Discovery / Analysis (research only; the
+// `files`/`save_artifact` tools are sandboxed to the work dir, never the project).
+const READ_TOOLS = [
+  'web_search', 'fetch_url', 'read_file', 'find_in_file',
+  'files', 'note', 'save_artifact', 'stage', 'done'
+];
+
+// Read tools + propose (proposals are themselves gated in the approval inbox, so
+// a read mode that only proposes still changes no asset directly).
+const PLAN_TOOLS = [...READ_TOOLS, 'propose'];
+
+// Full write surface for Implementation / Revision.
+const WRITE_TOOLS = [
+  'read_file', 'find_in_file', 'files', 'write_file', 'verify',
+  'git', 'github', 'shell', 'propose', 'note', 'save_artifact', 'stage', 'done'
+];
+
+const MODES = {
+  discovery: {
+    id: 'discovery', label: 'Discovery', klass: 'read',
+    allowList: READ_TOOLS, nextMode: 'analysis',
+    goalFragment:
+      'DISCOVERY MODE (read-only). Gather context only. Read the project spec, ' +
+      'context, tasks, linked files and code, and any documentation. Identify what ' +
+      'is missing or unclear. Make NO changes and propose nothing — record what you ' +
+      'find with the note tool. Finish by calling done with a summary of what you ' +
+      'learned and set next_mode to "analysis".',
+    promptFragment:
+      'You are in DISCOVERY mode. Your only job is to gather and record context. ' +
+      'You CANNOT modify any project asset and have no write or propose tools. ' +
+      'Read, search, fetch, and note your findings, then call done.'
+  },
+
+  analysis: {
+    id: 'analysis', label: 'Analysis', klass: 'read',
+    allowList: READ_TOOLS, nextMode: 'planning',
+    goalFragment:
+      'ANALYSIS MODE (read-only). Evaluate the current state against the spec and ' +
+      'success criteria. Identify problems, dependencies, risks and opportunities. ' +
+      'Produce findings and recommendations with the note/save_artifact tools. Make ' +
+      'NO changes. Finish by calling done with your findings and set next_mode to ' +
+      '"planning".',
+    promptFragment:
+      'You are in ANALYSIS mode. Evaluate, do not change. You have no write or ' +
+      'propose tools. Record findings and recommendations, then call done.'
+  },
+
+  planning: {
+    id: 'planning', label: 'Planning', klass: 'read',
+    allowList: PLAN_TOOLS, nextMode: 'approval_request',
+    goalFragment:
+      'PLANNING MODE (no code changes). Turn the objective into a concrete, reviewable ' +
+      'plan. Break large work into SMALL tasks (use propose add_tasks, max 6 at a time) ' +
+      'and, if the project lacks a clear spec, propose one (propose set_spec with ' +
+      'measurable success criteria). Do NOT edit any file or write code. Finish by ' +
+      'calling done summarising the plan and set next_mode to "approval_request".',
+    promptFragment:
+      'You are in PLANNING mode. You may research and file proposals (add_tasks, ' +
+      'set_spec, update_description) but you CANNOT edit files or write code. Decompose ' +
+      'big work into small reviewable tasks, then call done.'
+  },
+
+  approval_request: {
+    id: 'approval_request', label: 'Approval Request', klass: 'read',
+    allowList: PLAN_TOOLS, nextMode: 'implementation',
+    goalFragment:
+      'APPROVAL REQUEST MODE (no code changes). Present the work about to be done for ' +
+      'human sign-off. Ensure the concrete tasks are filed (propose add_tasks) and then ' +
+      'file ONE propose authorize_mode with mode "implementation" and a short plain-' +
+      'language plan of exactly what the implementation phase will change. Do NOT edit ' +
+      'any file. Finish by calling done and set next_mode to "implementation".',
+    promptFragment:
+      'You are in APPROVAL REQUEST mode. You cannot change project assets. Make sure ' +
+      'the plan is filed as proposals and file one authorize_mode proposal for the ' +
+      'implementation phase, then call done. The human approves in the app inbox.'
+  },
+
+  implementation: {
+    id: 'implementation', label: 'Implementation', klass: 'write',
+    allowList: WRITE_TOOLS, nextMode: 'validation',
+    goalFragment:
+      'IMPLEMENTATION MODE (writes code). Execute the APPROVED plan and nothing beyond ' +
+      'it. Make the real change: read_file to inspect, write_file to edit, verify to ' +
+      'check syntax, then git add + git commit. Stay strictly within the approved scope ' +
+      '— if you discover the plan was wrong, stop and report rather than expanding scope. ' +
+      'Finish by calling done with what you changed and set next_mode to "validation".',
+    promptFragment: null   // use the default executor prompt (with deploy note)
+  },
+
+  validation: {
+    id: 'validation', label: 'Validation', klass: 'read',
+    allowList: ['read_file', 'find_in_file', 'files', 'verify', 'shell', 'note', 'stage', 'done'],
+    nextMode: 'deployment',
+    goalFragment:
+      'VALIDATION MODE (read-only). Test and verify the work just implemented. Run ' +
+      'verify on changed files, review outputs, and confirm the success criteria were ' +
+      'actually met. Make NO changes. If everything passes, set next_mode to ' +
+      '"deployment". If you find failures, document them with note and set next_mode to ' +
+      '"revision". Finish by calling done with the validation result.',
+    promptFragment:
+      'You are in VALIDATION mode. Test and verify only — you have no write tools. ' +
+      'Confirm the work meets its criteria, document any failures, then call done with ' +
+      'next_mode set to "deployment" (pass) or "revision" (fail).'
+  },
+
+  revision: {
+    id: 'revision', label: 'Revision', klass: 'write',
+    allowList: WRITE_TOOLS, nextMode: 'validation',
+    goalFragment:
+      'REVISION MODE (writes code). Address ONLY the specific issues found during ' +
+      'validation. Apply targeted corrections (read_file → write_file → verify → git ' +
+      'commit), do not add new scope. Finish by calling done with what you fixed and set ' +
+      'next_mode to "validation" so the fix is re-checked.',
+    promptFragment: null
+  },
+
+  deployment: {
+    id: 'deployment', label: 'Deployment', klass: 'write',
+    allowList: ['read_file', 'git', 'verify', 'note', 'stage', 'done'],
+    nextMode: 'reporting',
+    goalFragment:
+      'DEPLOYMENT MODE. The validated change is ready to ship. Ensure all work is ' +
+      'committed (git add + git commit). The workflow then pushes, deploys to the live ' +
+      'site, and verifies it is live automatically — you do not push yourself. Finish by ' +
+      'calling done confirming the change is committed and set next_mode to "reporting".',
+    promptFragment:
+      'You are in DEPLOYMENT mode. Ensure the validated change is committed; the ' +
+      'workflow handles push + live verification automatically. Then call done.'
+  },
+
+  reporting: {
+    id: 'reporting', label: 'Reporting', klass: 'read',
+    allowList: ['read_file', 'files', 'note', 'stage', 'done'],
+    nextMode: 'discovery',
+    goalFragment:
+      'REPORTING MODE (read-only). Summarise what the flow accomplished: actions taken, ' +
+      'results, blockers, and lessons. Recommend what should happen next. Make NO ' +
+      'changes. Finish by calling done with the report and set next_mode to "discovery" ' +
+      '(to start the next objective) — or note that the objective is complete.',
+    promptFragment:
+      'You are in REPORTING mode. Summarise outcomes and recommend next steps. You have ' +
+      'no write tools. Call done with your report.'
+  }
+};
+
+const ORDER = [
+  'discovery', 'analysis', 'planning', 'approval_request',
+  'implementation', 'validation', 'revision', 'deployment', 'reporting'
+];
+
+function getMode(id) {
+  return MODES[id] || null;
+}
+
+function isWrite(id) {
+  const m = MODES[id];
+  return Boolean(m && m.klass === 'write');
+}
+
+// Where a fresh objective starts. A project with no spec yet should begin at
+// discovery; one that already has a spec can skip straight to planning. Either
+// way the chain runs read-only until the write gate.
+function defaultStartMode(spec) {
+  if (spec && spec.hasGoal) return 'planning';
+  return 'discovery';
+}
+
+module.exports = { MODES, ORDER, getMode, isWrite, defaultStartMode, READ_TOOLS, PLAN_TOOLS, WRITE_TOOLS };

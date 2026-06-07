@@ -39,6 +39,7 @@ serve(async (req) => {
   if (reqBody.project_id)  inputs.project_id  = String(reqBody.project_id);
   if (reqBody.mode)        inputs.mode        = String(reqBody.mode);
   if (reqBody.target_repo) inputs.target_repo = String(reqBody.target_repo);
+  if (reqBody.action_mode) inputs.action_mode = String(reqBody.action_mode);
 
   const res = await fetch(
     `https://api.github.com/repos/${REPO}/actions/workflows/${WORKFLOW}/dispatches`,

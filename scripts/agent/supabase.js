@@ -130,7 +130,7 @@ function makeSupabase(config) {
 
   /* ── agent_runs (progress tracker record the UI polls) ── */
 
-  async function createRun(projectId) {
+  async function createRun(projectId, mode) {
     const now = Date.now();
     const row = {
       project_id: projectId, status: 'running', stage: 'planning', percent: 0,
@@ -144,7 +144,45 @@ function makeSupabase(config) {
     });
     if (!res.ok) return null;                 // tracker is best-effort; never block the loop
     const rows = await res.json().catch(() => []);
+    const created = rows[0] || null;
+    // Stamp the action mode in a SEPARATE patch. Keeping it out of the insert means
+    // a pre-migration schema (no `mode` column) still gets a working tracker run —
+    // only the mode field fails to persist, never the row itself.
+    if (created && mode) { try { await updateRun(created.id, { mode }); } catch { /* column may not exist yet */ } }
+    return created;
+  }
+
+  // Newest run for a project (used to derive the next mode to execute).
+  async function latestRun(projectId) {
+    const res = await rest(
+      `/agent_runs?project_id=eq.${encodeURIComponent(projectId)}&order=started_at.desc&limit=1`);
+    if (!res.ok) return null;
+    const rows = await res.json().catch(() => []);
     return rows[0] || null;
+  }
+
+  // Write-phase gate. Returns { authorized, mode, plan } describing whether the
+  // agent currently has human sign-off to run a write mode. An approved
+  // `authorize_mode` proposal writes a worklog row kind 'mode_authorized'; that
+  // token is valid until a NEWER planning run supersedes it (a new plan must be
+  // re-approved before the next write phase).
+  async function modeAuthorization(projectId) {
+    const wlRes = await rest(
+      `/worklog?project_id=eq.${encodeURIComponent(projectId)}&kind=eq.mode_authorized&order=created_at.desc&limit=1`);
+    if (!wlRes.ok) return { authorized: false };
+    const wl = (await wlRes.json().catch(() => []))[0];
+    if (!wl) return { authorized: false };
+    const authAt = wl.created_at || 0;
+    const detail = wl.detail || {};
+
+    // Superseded if a planning run started after this authorization.
+    const planRes = await rest(
+      `/agent_runs?project_id=eq.${encodeURIComponent(projectId)}&mode=eq.planning&started_at=gt.${authAt}&select=id&limit=1`);
+    if (planRes.ok) {
+      const newer = await planRes.json().catch(() => []);
+      if (newer.length) return { authorized: false };
+    }
+    return { authorized: true, mode: detail.mode || null, plan: detail.plan || '', at: authAt };
   }
 
   async function updateRun(id, patch) {
@@ -194,7 +232,7 @@ function makeSupabase(config) {
     pullProjects, pullProject, setSuggestion,
     addWorklog, pullWorklog,
     pendingApprovals, createApproval,
-    pullContext, createRun, updateRun,
+    pullContext, createRun, updateRun, latestRun, modeAuthorization,
     logError, pullErrorLog,
     rowToProject, ping
   };

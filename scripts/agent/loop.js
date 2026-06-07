@@ -107,12 +107,15 @@ How you work:
 - Finish with "done" summarising the focus order and what you proposed.`;
 }
 
-function systemPrompt(project, config) {
+function systemPrompt(project, config, mode) {
+  const isWriteMode    = Boolean(mode && mode.klass === 'write');
   const hasProjectRoot = Boolean(config && config.projectRoot);
-  const canWrite       = hasProjectRoot && (config.allowFileWrite);
-  const canCommit      = canWrite && config.allowGitWrite;
+  // Execution affordances only apply in WRITE modes — read modes have no write
+  // tools loaded, so the strict edit recipe + "commit isn't the finish line"
+  // deploy note would be misleading there.
+  const showExec = hasProjectRoot && isWriteMode;
 
-  const execBlock = hasProjectRoot ? `
+  const execBlock = showExec ? `
 REAL PROJECT FILES ARE ACCESSIBLE. Execution rules (strict):
 1. Use read_file op list to confirm the exact path before touching any file.
 2. Use read_file op read to see the file content.
@@ -127,27 +130,35 @@ REAL PROJECT FILES ARE ACCESSIBLE. Execution rules (strict):
   // The tracker advances automatically from real tool usage (see autoAdvanceStage),
   // so the prompt no longer needs to force stage() calls. Keep it Groq-safe: quoting
   // tool names with parens makes Groq/llama misfire into XML hermes format.
-  const deployNote = hasProjectRoot
+  const deployNote = showExec
     ? ' After you finish, the system automatically pushes your commit, deploys it to the live site, and verifies the change is actually live — so committing is NOT the finish line. A code change only counts once it is deployed and visible live; if it does not deploy, the run is not complete.'
     : '';
-  const progressNote = `Work step by step through your phases: planning → editing → testing.${deployNote} Finish by calling done with an honest summary of what you changed and, for any UI change, what it now looks like and where it appears on the page.`;
+  const progressNote = isWriteMode
+    ? `Work step by step through your phases: planning → editing → testing.${deployNote} Finish by calling done with an honest summary of what you changed and, for any UI change, what it now looks like and where it appears on the page.`
+    : `Finish by calling done with an honest summary of what you did and recommend the next action mode.`;
+
+  // The mode directive constrains the whole run to ONE action mode.
+  const modeBlock = mode ? `
+ACTION MODE: ${mode.label.toUpperCase()}. ${mode.promptFragment || mode.goalFragment}
+You operate in THIS mode ONLY for this run. Do not attempt work that belongs to a
+later mode. When you finish, call done and set next_mode to recommend what runs next.
+` : '';
 
   return `You are an autonomous work agent inside RunMyWork, a personal project hub.
 You are given ONE project and a goal. Make real progress using the available tools, then stop.
-
+${modeBlock}
 Rules:
 - You are a WORKER, not an advisor. Do the work — never write prose about what
   someone should do. If you catch yourself writing "I will…" or "I recommend…",
   stop and call a tool instead. Suggestions are only acceptable when the work is
   genuinely BLOCKED (missing access, external dependency); otherwise, act.
 - Each step: pick ONE concrete action, call ONE tool, read the result, then pick
-  the next action. Keep going until the criterion is actually advanced.
-- The PROJECT SPEC (goal + success criteria) is your north star. Every run should move
-  at least one success criterion closer to met. If the project has no spec yet, your job
-  is to research it and propose one (action set_spec).
+  the next action. Stay within your action mode.
+- The PROJECT SPEC (goal + success criteria) is your north star. If the project has no
+  spec yet, the planning mode proposes one (action set_spec).
 - Record findings with the note tool so they persist for next time.
 - Save research and drafts with the save_artifact tool.
-${hasProjectRoot ? `- A REAL CODE REPOSITORY is connected. Prefer concrete execution over talk: when a
+${showExec ? `- A REAL CODE REPOSITORY is connected. Prefer concrete execution over talk: when a
   criterion needs a code change, use read_file → write_file → verify → git add → git commit
   to actually make it. Do NOT substitute a markdown draft (save_artifact) or an add_tasks
   proposal for doing the work. Do the implementation YOURSELF — do not delegate it to a
@@ -188,6 +199,8 @@ async function runLoop(opts) {
   const { services } = opts;
   const { sb, ollama, config, log } = services;
   const project = opts.project || null;
+  const mode = opts.mode || null;             // action mode for this run (modes.js)
+  const isWriteMode = Boolean(mode && mode.klass === 'write');
   const depth = opts.depth || 0;
   const budget = opts.budget || config.budget;
   // top loop + board planning use the planner model; delegated children pass the
@@ -207,6 +220,9 @@ async function runLoop(opts) {
     changedFiles: [],     // real project files written by write_file tool
     committed: false,     // set true by git commit (reality check)
     criteriaAdvanced: '', // set by done tool (which success criterion advanced)
+    mode,                 // active action mode (modes.js) or null (board/legacy)
+    nextMode: '',         // set by done tool — recommended next mode
+    nextRationale: '',
     done: false,
     doneSummary: '',
     visualSummary: '', // set by done tool — what a UI change looks like + where
@@ -221,7 +237,7 @@ async function runLoop(opts) {
   // table/insert fails, ctx.run stays null and the loop runs exactly as before.
   if (depth === 0 && project) {
     try {
-      ctx.run = await sb.createRun(project.id);
+      ctx.run = await sb.createRun(project.id, mode && mode.id);
       if (!ctx.run) log('  ⚠ tracker: createRun returned null — tracker will be silent this run');
     } catch (e) {
       log(`  ⚠ tracker: createRun threw: ${e.message} — tracker will be silent this run`);
@@ -244,7 +260,7 @@ async function runLoop(opts) {
   };
 
   const messages = [
-    { role: 'system', content: project ? systemPrompt(project, config) : boardSystemPrompt() },
+    { role: 'system', content: project ? systemPrompt(project, config, mode) : boardSystemPrompt() },
     { role: 'user', content: buildUserPrompt(opts.goal, project, opts.contextText) }
   ];
 
@@ -339,8 +355,9 @@ async function runLoop(opts) {
           });
         }
       }
-      // On done, run two self-correction gates (top-level project loops only):
-      if (name === 'done' && ctx.done && depth === 0) {
+      // On done, run two self-correction gates (top-level WRITE-mode loops only).
+      // Read modes legitimately change nothing, so these gates must not fire there.
+      if (name === 'done' && ctx.done && depth === 0 && isWriteMode) {
         // Gate 1 — goal asked for a code change but nothing was written.
         const goalAsksForWrite = /patch|edit|write|modify|change|update|add.*line|remove.*line|wire up/i.test(opts.goal || '');
         const didWrite = (ctx.changedFiles || []).length > 0;
@@ -429,6 +446,9 @@ async function runLoop(opts) {
     // is actually live. Hand the run off in the "testing" stage with status
     // still running; deploy-verify.js drives it to live_verified → complete.
     const handingOff = ctx.committed && finishedClean && !modelErrored;
+    // The mode the next run should execute: the agent's recommendation, falling
+    // back to this mode's natural successor.
+    const nextMode = ctx.nextMode || (mode && mode.nextMode) || null;
     try {
       if (handingOff) {
         await sb.updateRun(ctx.run.id, {
@@ -448,6 +468,9 @@ async function runLoop(opts) {
         });
       }
     } catch { /* best effort */ }
+    // Recommended next mode goes in its own patch so a missing `next_mode` column
+    // (pre-migration) can never drop the critical status/summary patch above.
+    if (nextMode) { try { await sb.updateRun(ctx.run.id, { next_mode: nextMode }); } catch { /* column may not exist yet */ } }
   }
 
   return {
@@ -460,6 +483,9 @@ async function runLoop(opts) {
     committed: Boolean(ctx.committed),
     criteriaAdvanced: ctx.criteriaAdvanced || '',
     visualSummary: ctx.visualSummary || '',
+    mode: mode && mode.id,
+    nextMode: ctx.nextMode || (mode && mode.nextMode) || '',
+    nextRationale: ctx.nextRationale || '',
     runId: ctx.run && ctx.run.id
   };
 }

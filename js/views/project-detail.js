@@ -300,6 +300,15 @@ Views.ProjectDetail = (() => {
     ['live_verified', 'Live Verified'], ['complete', 'Complete']
   ];
 
+  // Action modes (mirrors scripts/agent/modes.js) for the tracker's Mode line.
+  const _MODE_LABELS = {
+    discovery: 'Discovery', analysis: 'Analysis', planning: 'Planning',
+    approval_request: 'Approval Request', implementation: 'Implementation',
+    validation: 'Validation', revision: 'Revision', deployment: 'Deployment',
+    reporting: 'Reporting'
+  };
+  const _WRITE_MODES = ['implementation', 'revision', 'deployment'];
+
   // Empty container; loadRun() fills + reveals it only when a run exists.
   function _renderTrackerSection(project) {
     return `<div class="section-card tracker" id="tracker-${project.id}" style="display:none;"></div>`;
@@ -356,6 +365,21 @@ Views.ProjectDetail = (() => {
       ? `<a class="btn btn-sm" href="${Models.escapeHtml(liveUrl)}" target="_blank" rel="noopener" style="margin-top:8px;display:inline-block;">↗ Open live site</a>`
       : '';
 
+    // Action-mode line: which bounded mode this run executed + what it recommends next.
+    const modeLabel = run.mode ? (_MODE_LABELS[run.mode] || run.mode) : null;
+    const nextLabel = run.next_mode ? (_MODE_LABELS[run.next_mode] || run.next_mode) : null;
+    const modeClass = _WRITE_MODES.includes(run.mode) ? 'write' : 'read-only';
+    const modeLine = modeLabel
+      ? `<div class="tracker-meta">Mode: <strong>${Models.escapeHtml(modeLabel)}</strong> (${modeClass})${nextLabel ? ` · recommends → ${Models.escapeHtml(nextLabel)}` : ''}</div>`
+      : '';
+
+    // A write mode blocked on approval records a 0% "paused" run; surface a clear
+    // call to action linking to the inbox where the authorization Approve lives.
+    const pendingApproval = /pending your approval/i.test(run.summary || '');
+    const approvalNote = pendingApproval
+      ? `<p class="tracker-summary" style="border-left:3px solid var(--c-active,#3b82f6);padding-left:8px;">⏸ Awaiting your approval to start the ${Models.escapeHtml(nextLabel || 'write')} phase. <a href="#/approvals">Open approvals →</a></p>`
+      : '';
+
     return `
       <div class="section-header" style="margin-bottom:10px;">
         <span class="section-title">🤖 Agent progress</span>${badge}
@@ -363,7 +387,8 @@ Views.ProjectDetail = (() => {
       <div class="tracker-bar">${segs}</div>
       <div class="tracker-fill-wrap"><div class="tracker-fill" style="width:${pct}%"></div></div>
       <div class="tracker-meta">Stage ${curIdx + 1} of ${_STAGES.length} · ${_STAGES[curIdx][1]} · ${pct}% · ${when}</div>
-      ${run.summary ? `<p class="tracker-summary">${Models.escapeHtml(run.summary)}</p>` : ''}
+      ${modeLine}
+      ${approvalNote || (run.summary ? `<p class="tracker-summary">${Models.escapeHtml(run.summary)}</p>` : '')}
       ${liveBtn}
       <div class="tracker-stages">${stageRows}</div>`;
   }
