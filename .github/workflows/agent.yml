@@ -81,6 +81,7 @@ jobs:
             git -C _target config user.email "agent@runmywork.local"
             echo "root=$GITHUB_WORKSPACE/_target" >> "$GITHUB_OUTPUT"
             echo "repo=${{ inputs.target_repo }}" >> "$GITHUB_OUTPUT"
+            echo "reponame=$(echo '${{ inputs.target_repo }}' | cut -d'/' -f2)" >> "$GITHUB_OUTPUT"
             echo "external=1" >> "$GITHUB_OUTPUT"
           else
             echo "root=$GITHUB_WORKSPACE" >> "$GITHUB_OUTPUT"
@@ -175,5 +176,5 @@ jobs:
           SUPABASE_URL:              https://tmqffprfhavzbaycvxej.supabase.co
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           DEPLOY_BUILD_ID:           ${{ github.run_id }}
-          LIVE_URL:                  ${{ steps.target.outputs.external == '1' && format('https://samcbarth.github.io/{0}', steps.target.outputs.repo) || 'https://samcbarth.github.io/runmywork' }}
+          LIVE_URL:                  ${{ steps.target.outputs.external == '1' && format('https://samcbarth.github.io/{0}', steps.target.outputs.reponame) || 'https://samcbarth.github.io/runmywork' }}
         run: node scripts/agent/deploy-verify.js
