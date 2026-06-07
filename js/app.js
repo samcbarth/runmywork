@@ -349,6 +349,7 @@ const App = (() => {
 
   async function init() {
     window.addEventListener('hashchange', _handleRoute);
+    Views.Proposals.render();
 
     const activeSession = Store.getActiveSession();
     if (activeSession) startGlobalTimer(activeSession);
