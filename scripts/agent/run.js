@@ -237,7 +237,8 @@ async function runForProject(services, project, goalOverride, budgetOverride) {
         artifacts: result.artifacts,
         changedFiles: filesChanged,
         committed: Boolean(result.committed),
-        criteriaAdvanced: result.criteriaAdvanced || ''
+        criteriaAdvanced: result.criteriaAdvanced || '',
+        visualSummary: result.visualSummary || ''
       }
     });
   } catch { /* best effort */ }
@@ -377,13 +378,39 @@ async function main() {
   }
   log(`${targets.length} project(s) this run.`);
 
+  // Collect runs that actually committed code so the workflow knows it must push
+  // to main, wait for the GitHub Pages deploy, and verify the change is live
+  // before flipping those tracker runs to complete (see deploy-verify.js).
+  const handoff = { committed: false, runs: [], visualSummary: '', changedFiles: [], summary: '' };
+
   for (const project of targets) {
     try {
-      await runForProject(services, project, args.project ? args.goal : undefined, args.budget);
+      const result = await runForProject(services, project, args.project ? args.goal : undefined, args.budget);
+      if (result && result.committed) {
+        handoff.committed = true;
+        if (result.runId) handoff.runs.push(result.runId);
+        if (result.visualSummary && !handoff.visualSummary) handoff.visualSummary = result.visualSummary;
+        if (Array.isArray(result.changedFiles)) handoff.changedFiles.push(...result.changedFiles);
+        if (result.summary && !handoff.summary) handoff.summary = result.summary;
+      }
     } catch (e) {
       log(`   ✗ ${project.title} failed: ${e.message}`);
     }
   }
+
+  // Write the deploy handoff for the workflow. Always write it (even when empty)
+  // so the workflow has a deterministic file to read.
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const outDir = path.join(__dirname, 'work');
+    fs.mkdirSync(outDir, { recursive: true });
+    fs.writeFileSync(path.join(outDir, 'deploy-handoff.json'), JSON.stringify(handoff, null, 2));
+    log(`Deploy handoff: committed=${handoff.committed} runs=${handoff.runs.length}`);
+  } catch (e) {
+    log(`   (could not write deploy handoff: ${e.message})`);
+  }
+
   log('Done.');
 }
 

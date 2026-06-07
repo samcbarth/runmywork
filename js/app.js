@@ -1,6 +1,6 @@
 const App = (() => {
   // Bumped on each deploy so you can confirm which build is live (shown in Settings).
-  const BUILD = '2026-06-06 · targeted runs + auto-stage tracker';
+  const BUILD = '2026-06-07 · deploy-aware 7-stage tracker';
 
   let _timerInterval = null;
   let _swRegistration = null;

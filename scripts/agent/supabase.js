@@ -133,8 +133,8 @@ function makeSupabase(config) {
   async function createRun(projectId) {
     const now = Date.now();
     const row = {
-      project_id: projectId, status: 'running', stage: 'look', percent: 0,
-      stages: [{ stage: 'look', enteredAt: now }], log: [],
+      project_id: projectId, status: 'running', stage: 'planning', percent: 0,
+      stages: [{ stage: 'planning', enteredAt: now }], log: [],
       summary: '', started_at: now, updated_at: now
     };
     const res = await rest(`/agent_runs`, {

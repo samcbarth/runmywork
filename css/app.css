@@ -997,7 +997,7 @@ svg { display: block; }
 }
 .tracker-seg.done .tracker-dot    { background: var(--c-active); color: #fff; border-color: var(--c-active); }
 .tracker-seg.current .tracker-dot { background: var(--accent); color: #fff; border-color: var(--accent); animation: tracker-pulse 1.4s ease-in-out infinite; }
-.tracker-seg-label { font-size: 0.7rem; color: var(--text-2); }
+.tracker-seg-label { font-size: 0.7rem; color: var(--text-2); text-align: center; line-height: 1.1; }
 .tracker-seg.current .tracker-seg-label { color: var(--accent); font-weight: 700; }
 .tracker-seg.done .tracker-seg-label { color: var(--text); }
 

@@ -31,13 +31,26 @@ on:
           - plan    # board planner — pick focus across all projects
           - force   # ignore the "needs it" filter
 
+# contents: push agent commits to main. pages + id-token: deploy to GitHub Pages
+# from THIS workflow (a push made with the default GITHUB_TOKEN does NOT trigger
+# deploy.yml, so the agent deploys Pages itself rather than relying on that).
 permissions:
   contents: write
-  pull-requests: write
+  pull-requests: write   # the github tool may still open PRs for non-deploy work
+  pages: write
+  id-token: write
+
+# Serialise with deploy.yml (same "pages" group) so agent deploys and human-push
+# deploys never race for the single Pages deployment slot.
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
 
 jobs:
   agent:
     runs-on: ubuntu-latest
+    environment:
+      name: github-pages
 
     steps:
       - uses: actions/checkout@v4
@@ -51,13 +64,10 @@ jobs:
           git config user.name "RunMyWork Agent"
           git config user.email "agent@runmywork.local"
 
-      # Each run works on its own branch so changes don't go to main unreviewed.
-      - name: Create agent branch
-        id: branch
-        run: |
-          BRANCH="agent/run-$(date -u +%Y%m%d-%H%M%S)"
-          git checkout -b "$BRANCH"
-          echo "name=$BRANCH" >> "$GITHUB_OUTPUT"
+      # Auto-deploy model: the agent commits straight onto main and the workflow
+      # pushes it, so the change deploys without a human merge. Project STATE is
+      # still gated by the approval inbox; only CODE auto-ships. The run is not
+      # "complete" until deploy-verify.js confirms it is live (see below).
 
       # Build CLI flags from workflow_dispatch inputs (all optional).
       - name: Build run flags
@@ -84,21 +94,55 @@ jobs:
           AGENT_BUDGET:              '24'  # room for real code work: read→write→verify→commit
         run: node scripts/agent/run.js ${{ steps.flags.outputs.flags }}
 
-      # If the agent committed anything, push the branch and open a PR.
-      # Merging that PR triggers deploy.yml → GitHub Pages auto-updates.
-      - name: Push and open PR if commits were made
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # If the agent committed anything, stamp the build into version.json, push
+      # to main (which triggers deploy.yml → GitHub Pages), and record whether a
+      # push happened so the verify step knows what to do.
+      - name: Stamp build and push to main if commits were made
+        id: push
         run: |
           COMMITS=$(git rev-list --count origin/main..HEAD 2>/dev/null || echo 0)
           echo "New commits since main: $COMMITS"
           if [ "$COMMITS" -gt 0 ]; then
-            git push origin "${{ steps.branch.outputs.name }}"
-            gh pr create \
-              --title "Agent: $(date -u +'%Y-%m-%d %H:%M UTC')" \
-              --body "Automated changes from RunMyWork agent run. Review and merge to deploy." \
-              --base main \
-              --head "${{ steps.branch.outputs.name }}"
+            # version.json is the live deploy marker deploy-verify.js polls for.
+            printf '{"build":"%s","sha":"%s","deployedAt":"%s"}\n' \
+              "$GITHUB_RUN_ID" "$(git rev-parse --short HEAD)" "$(date -u +%FT%TZ)" > version.json
+            git add version.json
+            git commit -m "build: stamp $GITHUB_RUN_ID for live verification"
+            git push origin HEAD:main
+            echo "pushed=1" >> "$GITHUB_OUTPUT"
           else
             echo "No commits — nothing to push."
+            echo "pushed=0" >> "$GITHUB_OUTPUT"
           fi
+
+      # Deploy to GitHub Pages from this workflow (only when the agent pushed
+      # code). A push with the default GITHUB_TOKEN won't trigger deploy.yml, so
+      # we deploy the artifact directly here. version.json (stamped above) is
+      # included in the artifact, which is exactly what deploy-verify.js polls for.
+      - name: Setup Pages
+        if: steps.push.outputs.pushed == '1'
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        if: steps.push.outputs.pushed == '1'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: '.'
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        if: steps.push.outputs.pushed == '1'
+        uses: actions/deploy-pages@v4
+
+      # Confirm the change is actually served live, then flip the tracker
+      # runs to live_verified → complete. Runs even if the push step errored so a
+      # committed-but-not-live run is correctly reported as "pending live", never
+      # silently stuck at "running". Self-gates on the agent's deploy handoff.
+      - name: Verify live deployment
+        if: always()
+        env:
+          SUPABASE_URL:              https://tmqffprfhavzbaycvxej.supabase.co
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          DEPLOY_BUILD_ID:           ${{ github.run_id }}
+          LIVE_URL:                  https://samcbarth.github.io/runmywork
+        run: node scripts/agent/deploy-verify.js

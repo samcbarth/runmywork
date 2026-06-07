@@ -52,17 +52,22 @@ function describeCall(name, args) {
   }
 }
 
-// Map each tool to the workflow stage it represents, so the tracker advances
-// from real tool activity even when the model never calls stage() itself.
+// Map each tool to the lifecycle stage it represents, so the tracker advances
+// from real tool activity even when the model never calls stage() itself. The
+// agent only drives the first three stages (planning/editing/testing); the
+// remaining four (pushed/deploying/live_verified/complete) are driven by
+// deploy-verify.js after the agent process exits.
 const TOOL_STAGE_MAP = {
-  web_search: 'look', fetch_url: 'look', read_file: 'look',
-  find_in_file: 'look', files: 'look',
-  note: 'think', save_artifact: 'think', delegate: 'think',
-  write_file: 'do', git: 'do', shell: 'do', github: 'do',
-  verify: 'review',
-  propose: 'report'
+  web_search: 'planning', fetch_url: 'planning', read_file: 'planning',
+  find_in_file: 'planning', files: 'planning', note: 'planning',
+  save_artifact: 'planning', delegate: 'planning',
+  write_file: 'editing', git: 'editing', shell: 'editing', github: 'editing',
+  verify: 'testing',
+  propose: 'testing'
 };
-const STAGE_ORDER = ['look', 'think', 'do', 'review', 'revise', 'report'];
+// Full lifecycle order — percent is index-based against all 7 so the in-loop
+// stages (planning..testing) leave room for the post-agent deploy stages.
+const STAGE_ORDER = ['planning', 'editing', 'testing', 'pushed', 'deploying', 'live_verified', 'complete'];
 
 // Move the tracker stage forward (never backward) based on the tool just run.
 async function autoAdvanceStage(ctx, toolName) {
@@ -122,7 +127,10 @@ REAL PROJECT FILES ARE ACCESSIBLE. Execution rules (strict):
   // The tracker advances automatically from real tool usage (see autoAdvanceStage),
   // so the prompt no longer needs to force stage() calls. Keep it Groq-safe: quoting
   // tool names with parens makes Groq/llama misfire into XML hermes format.
-  const progressNote = 'Work step by step through the phases look → think → do → review → revise → report. Finish by calling done with an honest summary of what you changed.';
+  const deployNote = hasProjectRoot
+    ? ' After you finish, the system automatically pushes your commit, deploys it to the live site, and verifies the change is actually live — so committing is NOT the finish line. A code change only counts once it is deployed and visible live; if it does not deploy, the run is not complete.'
+    : '';
+  const progressNote = `Work step by step through your phases: planning → editing → testing.${deployNote} Finish by calling done with an honest summary of what you changed and, for any UI change, what it now looks like and where it appears on the page.`;
 
   return `You are an autonomous work agent inside RunMyWork, a personal project hub.
 You are given ONE project and a goal. Make real progress using the available tools, then stop.
@@ -201,7 +209,8 @@ async function runLoop(opts) {
     criteriaAdvanced: '', // set by done tool (which success criterion advanced)
     done: false,
     doneSummary: '',
-    currentStage: 'look',
+    visualSummary: '', // set by done tool — what a UI change looks like + where
+    currentStage: 'planning',
     run: null,        // agent_runs row (top-level project loops only)
     tools,
     runLoop          // delegate uses this to spawn sub-loops
@@ -415,14 +424,29 @@ async function runLoop(opts) {
   // finalize the tracker run
   if (ctx.run) {
     const finishedClean = ctx.done;
+    // If the agent committed code, the run is NOT complete yet — the workflow
+    // still has to push to main, let GitHub Pages deploy, and verify the change
+    // is actually live. Hand the run off in the "testing" stage with status
+    // still running; deploy-verify.js drives it to live_verified → complete.
+    const handingOff = ctx.committed && finishedClean && !modelErrored;
     try {
-      await sb.updateRun(ctx.run.id, {
-        status: modelErrored ? 'failed' : 'done',
-        stage: finishedClean ? 'report' : ctx.currentStage,
-        percent: finishedClean ? 100 : (ctx.run.percent || 0),
-        summary: (ctx.doneSummary || '').slice(0, 1000),
-        ended_at: Date.now()
-      });
+      if (handingOff) {
+        await sb.updateRun(ctx.run.id, {
+          status: 'running',
+          stage: 'testing',
+          percent: Math.max(ctx.run.percent || 0, Math.round((3 / 7) * 100)),
+          summary: (ctx.doneSummary || '').slice(0, 1000)
+          // no ended_at — the run is still in flight (deploy + live verify pending)
+        });
+      } else {
+        await sb.updateRun(ctx.run.id, {
+          status: modelErrored ? 'failed' : 'done',
+          stage: modelErrored ? ctx.currentStage : (finishedClean ? 'complete' : ctx.currentStage),
+          percent: finishedClean && !modelErrored ? 100 : (ctx.run.percent || 0),
+          summary: (ctx.doneSummary || '').slice(0, 1000),
+          ended_at: Date.now()
+        });
+      }
     } catch { /* best effort */ }
   }
 
@@ -434,7 +458,9 @@ async function runLoop(opts) {
     findings: ctx.findings,
     changedFiles: ctx.changedFiles || [],
     committed: Boolean(ctx.committed),
-    criteriaAdvanced: ctx.criteriaAdvanced || ''
+    criteriaAdvanced: ctx.criteriaAdvanced || '',
+    visualSummary: ctx.visualSummary || '',
+    runId: ctx.run && ctx.run.id
   };
 }
 

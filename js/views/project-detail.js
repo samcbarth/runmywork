@@ -295,8 +295,9 @@ Views.ProjectDetail = (() => {
   /* ── Agent progress tracker (Domino's-style) ── */
 
   const _STAGES = [
-    ['look', 'Look'], ['think', 'Think'], ['do', 'Do'],
-    ['review', 'Review'], ['revise', 'Revise'], ['report', 'Report']
+    ['planning', 'Planning'], ['editing', 'Editing'], ['testing', 'Testing'],
+    ['pushed', 'Pushed'], ['deploying', 'Deploying'],
+    ['live_verified', 'Live Verified'], ['complete', 'Complete']
   ];
 
   // Empty container; loadRun() fills + reveals it only when a run exists.
@@ -354,7 +355,7 @@ Views.ProjectDetail = (() => {
       </div>
       <div class="tracker-bar">${segs}</div>
       <div class="tracker-fill-wrap"><div class="tracker-fill" style="width:${pct}%"></div></div>
-      <div class="tracker-meta">Stage ${curIdx + 1} of 6 · ${_STAGES[curIdx][1]} · ${pct}% · ${when}</div>
+      <div class="tracker-meta">Stage ${curIdx + 1} of ${_STAGES.length} · ${_STAGES[curIdx][1]} · ${pct}% · ${when}</div>
       ${run.summary ? `<p class="tracker-summary">${Models.escapeHtml(run.summary)}</p>` : ''}
       <div class="tracker-stages">${stageRows}</div>`;
   }
@@ -656,6 +657,11 @@ Views.ProjectDetail = (() => {
       html += changed.map(f =>
         `<div class="worklog-file">✏ ${Models.escapeHtml(f.path)}${f.reason ? ` — ${Models.escapeHtml(f.reason)}` : ''}</div>`
       ).join('');
+    }
+    // what the change looks like + where it appears (agent's visual summary)
+    if (d.visualSummary) {
+      html += `<div style="margin-top:6px;font-size:0.78rem;color:var(--text-2);">What changed visually:</div>`;
+      html += `<div class="worklog-detail">${Models.escapeHtml(d.visualSummary)}</div>`;
     }
     return html;
   }
