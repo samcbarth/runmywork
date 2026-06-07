@@ -581,8 +581,9 @@ const Sync = (() => {
       // Target a specific project (and force the "needs it" filter off) so the
       // cloud run actually works that project — otherwise mode=auto picks none.
       const payload = {};
-      if (opts.projectId) payload.project_id = opts.projectId;
-      if (opts.force)     payload.mode       = 'force';
+      if (opts.projectId)  payload.project_id  = opts.projectId;
+      if (opts.force)      payload.mode        = 'force';
+      if (opts.targetRepo) payload.target_repo = opts.targetRepo;
       const res = await fetch(`${SUPABASE_URL}/functions/v1/trigger-agent`, {
         method: 'POST',
         headers: {

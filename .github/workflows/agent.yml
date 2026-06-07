@@ -30,6 +30,10 @@ on:
           - all     # sweep every open project
           - plan    # board planner — pick focus across all projects
           - force   # ignore the "needs it" filter
+      target_repo:
+        description: 'External repo to work on (e.g. samcbarth/testingsite). Blank = this repo.'
+        required: false
+        default: ''
 
 # contents: push agent commits to main. pages + id-token: deploy to GitHub Pages
 # from THIS workflow (a push made with the default GITHUB_TOKEN does NOT trigger
@@ -64,6 +68,26 @@ jobs:
           git config user.name "RunMyWork Agent"
           git config user.email "agent@runmywork.local"
 
+      # When target_repo is set, clone that repo into _target/ and point the
+      # agent at it. The agent commits to _target/; the push step sends those
+      # commits back to target_repo using TESTINGSITE_PAT. When target_repo is
+      # blank the agent works on this repo as normal.
+      - name: Clone target repo (if set)
+        id: target
+        run: |
+          if [ -n "${{ inputs.target_repo }}" ]; then
+            git clone "https://x-access-token:${{ secrets.TESTINGSITE_PAT }}@github.com/${{ inputs.target_repo }}.git" _target
+            git -C _target config user.name "RunMyWork Agent"
+            git -C _target config user.email "agent@runmywork.local"
+            echo "root=$GITHUB_WORKSPACE/_target" >> "$GITHUB_OUTPUT"
+            echo "repo=${{ inputs.target_repo }}" >> "$GITHUB_OUTPUT"
+            echo "external=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "root=$GITHUB_WORKSPACE" >> "$GITHUB_OUTPUT"
+            echo "repo=samcbarth/runmywork" >> "$GITHUB_OUTPUT"
+            echo "external=0" >> "$GITHUB_OUTPUT"
+          fi
+
       # Auto-deploy model: the agent commits straight onto main and the workflow
       # pushes it, so the change deploys without a human merge. Project STATE is
       # still gated by the approval inbox; only CODE auto-ships. The run is not
@@ -87,7 +111,7 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           OPENAI_API_KEY:            ${{ secrets.OPENAI_API_KEY }}
           GITHUB_TOKEN:              ${{ secrets.GITHUB_TOKEN }}
-          AGENT_PROJECT_ROOT:        ${{ github.workspace }}
+          AGENT_PROJECT_ROOT:        ${{ steps.target.outputs.root }}
           AGENT_ALLOW_FILE_WRITE:    '1'
           AGENT_ALLOW_GIT_WRITE:     '1'
           AGENT_ALLOW_GIT_PUSH:      '0'   # workflow handles the push below
@@ -100,15 +124,20 @@ jobs:
       - name: Stamp build and push to main if commits were made
         id: push
         run: |
-          COMMITS=$(git rev-list --count origin/main..HEAD 2>/dev/null || echo 0)
+          ROOT="${{ steps.target.outputs.root }}"
+          EXTERNAL="${{ steps.target.outputs.external }}"
+          COMMITS=$(git -C "$ROOT" rev-list --count origin/HEAD..HEAD 2>/dev/null || echo 0)
           echo "New commits since main: $COMMITS"
           if [ "$COMMITS" -gt 0 ]; then
-            # version.json is the live deploy marker deploy-verify.js polls for.
             printf '{"build":"%s","sha":"%s","deployedAt":"%s"}\n' \
-              "$GITHUB_RUN_ID" "$(git rev-parse --short HEAD)" "$(date -u +%FT%TZ)" > version.json
-            git add version.json
-            git commit -m "build: stamp $GITHUB_RUN_ID for live verification"
-            git push origin HEAD:main
+              "$GITHUB_RUN_ID" "$(git -C "$ROOT" rev-parse --short HEAD)" "$(date -u +%FT%TZ)" > "$ROOT/version.json"
+            git -C "$ROOT" add version.json
+            git -C "$ROOT" commit -m "build: stamp $GITHUB_RUN_ID for live verification"
+            if [ "$EXTERNAL" = "1" ]; then
+              git -C "$ROOT" push "https://x-access-token:${{ secrets.TESTINGSITE_PAT }}@github.com/${{ steps.target.outputs.repo }}.git" HEAD:main
+            else
+              git -C "$ROOT" push origin HEAD:main
+            fi
             echo "pushed=1" >> "$GITHUB_OUTPUT"
           else
             echo "No commits — nothing to push."
@@ -119,19 +148,21 @@ jobs:
       # code). A push with the default GITHUB_TOKEN won't trigger deploy.yml, so
       # we deploy the artifact directly here. version.json (stamped above) is
       # included in the artifact, which is exactly what deploy-verify.js polls for.
+      # Only deploy Pages from here when working on THIS repo. External repos
+      # (target_repo set) have their own deploy.yml that triggers on push.
       - name: Setup Pages
-        if: steps.push.outputs.pushed == '1'
+        if: steps.push.outputs.pushed == '1' && steps.target.outputs.external == '0'
         uses: actions/configure-pages@v5
 
       - name: Upload Pages artifact
-        if: steps.push.outputs.pushed == '1'
+        if: steps.push.outputs.pushed == '1' && steps.target.outputs.external == '0'
         uses: actions/upload-pages-artifact@v3
         with:
           path: '.'
 
       - name: Deploy to GitHub Pages
         id: deployment
-        if: steps.push.outputs.pushed == '1'
+        if: steps.push.outputs.pushed == '1' && steps.target.outputs.external == '0'
         uses: actions/deploy-pages@v4
 
       # Confirm the change is actually served live, then flip the tracker
@@ -144,5 +175,5 @@ jobs:
           SUPABASE_URL:              https://tmqffprfhavzbaycvxej.supabase.co
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           DEPLOY_BUILD_ID:           ${{ github.run_id }}
-          LIVE_URL:                  https://samcbarth.github.io/runmywork
+          LIVE_URL:                  ${{ steps.target.outputs.external == '1' && format('https://samcbarth.github.io/{0}', steps.target.outputs.repo) || 'https://samcbarth.github.io/runmywork' }}
         run: node scripts/agent/deploy-verify.js

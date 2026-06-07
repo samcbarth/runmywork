@@ -36,8 +36,9 @@ serve(async (req) => {
   // agent.yml so the run actually works that project instead of auto-picking none.
   const reqBody = await req.json().catch(() => ({}));
   const inputs: Record<string, string> = {};
-  if (reqBody.project_id) inputs.project_id = String(reqBody.project_id);
-  if (reqBody.mode)       inputs.mode       = String(reqBody.mode);
+  if (reqBody.project_id)  inputs.project_id  = String(reqBody.project_id);
+  if (reqBody.mode)        inputs.mode        = String(reqBody.mode);
+  if (reqBody.target_repo) inputs.target_repo = String(reqBody.target_repo);
 
   const res = await fetch(
     `https://api.github.com/repos/${REPO}/actions/workflows/${WORKFLOW}/dispatches`,

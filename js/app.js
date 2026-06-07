@@ -1,6 +1,6 @@
 const App = (() => {
   // Bumped on each deploy so you can confirm which build is live (shown in Settings).
-  const BUILD = '2026-06-07 · run notifications + review handoff';
+  const BUILD = '2026-06-07 · testingsite + target_repo + live-site button';
 
   let _timerInterval = null;
   let _swRegistration = null;
@@ -255,7 +255,18 @@ const App = (() => {
     // If we're on a project page, target THAT project so the run actually works it.
     const m = location.hash.match(/project\/([^/?]+)/);
     const projectId = m ? m[1] : null;
-    const res = await Sync.triggerAgent({ force: true, projectId });
+    // Also check for a target_repo instruction so external repos (e.g. testingsite)
+    // are cloned instead of the agent editing runmywork files.
+    let targetRepo = null;
+    if (projectId) {
+      try {
+        const ctx = await Sync.pullContext(projectId);
+        const entries = (ctx && ctx.entries) || [];
+        const row = entries.find(r => r.kind === 'instruction' && (r.content || '').startsWith('target_repo:'));
+        if (row) targetRepo = row.content.replace('target_repo:', '').trim();
+      } catch { /* best effort */ }
+    }
+    const res = await Sync.triggerAgent({ force: true, projectId, targetRepo });
     if (res.triggered) _agentRunUntil = Date.now() + 120000;
     showAgentStatus(res);
     _renderAgentChip();

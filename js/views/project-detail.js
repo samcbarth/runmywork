@@ -349,6 +349,13 @@ Views.ProjectDetail = (() => {
       ? `finished ${Models.formatDays(Date.now() - run.ended_at)} ago`
       : `started ${Models.formatDays(Date.now() - run.started_at)} ago`;
 
+    // Extract live URL from deploy report so user can tap straight to the changed site.
+    const liveUrlMatch = (run.summary || '').match(/Live URL checked:\s*(https?:\/\/\S+)/);
+    const liveUrl = liveUrlMatch ? liveUrlMatch[1].trim() : null;
+    const liveBtn = (run.status === 'done' && liveUrl)
+      ? `<a class="btn btn-sm" href="${Models.escapeHtml(liveUrl)}" target="_blank" rel="noopener" style="margin-top:8px;display:inline-block;">↗ Open live site</a>`
+      : '';
+
     return `
       <div class="section-header" style="margin-bottom:10px;">
         <span class="section-title">🤖 Agent progress</span>${badge}
@@ -357,6 +364,7 @@ Views.ProjectDetail = (() => {
       <div class="tracker-fill-wrap"><div class="tracker-fill" style="width:${pct}%"></div></div>
       <div class="tracker-meta">Stage ${curIdx + 1} of ${_STAGES.length} · ${_STAGES[curIdx][1]} · ${pct}% · ${when}</div>
       ${run.summary ? `<p class="tracker-summary">${Models.escapeHtml(run.summary)}</p>` : ''}
+      ${liveBtn}
       <div class="tracker-stages">${stageRows}</div>`;
   }
 
@@ -585,16 +593,33 @@ Views.ProjectDetail = (() => {
     _updateTaskUI(projectId, project);
   }
 
-  function requestAdvice(projectId) {
+  async function requestAdvice(projectId) {
     const project = Store.getProject(projectId);
     if (!project) return;
     project.aiRequested = true;
     Store.saveProject(project);   // syncs to Supabase; the agent reads ai_requested on its run
+    // Check if this project has a target_repo instruction (e.g. testingsite).
+    const targetRepo = await _getTargetRepo(projectId);
     // Fire a cloud run immediately, targeting this project, so the user sees the
     // tracker move now instead of waiting for the next scheduled sweep.
-    Sync.triggerAgent({ force: true, projectId }).catch(() => {});
+    Sync.triggerAgent({ force: true, projectId, targetRepo }).catch(() => {});
     // render() → loadRun() starts the discovery poll that catches the new run's tracker.
     render(projectId);
+  }
+
+  // Pull the target_repo from project_context instruction rows (cached for 60s).
+  const _targetRepoCache = {};
+  async function _getTargetRepo(projectId) {
+    const cached = _targetRepoCache[projectId];
+    if (cached && Date.now() - cached.at < 60000) return cached.repo;
+    try {
+      const res = await Sync.pullContext(projectId);
+      const entries = (res && res.entries) || [];
+      const row = entries.find(r => r.kind === 'instruction' && (r.content || '').startsWith('target_repo:'));
+      const repo = row ? row.content.replace('target_repo:', '').trim() : null;
+      _targetRepoCache[projectId] = { repo, at: Date.now() };
+      return repo;
+    } catch { return null; }
   }
 
   // Approve/reject a proposal inline — delegates to the shared Approvals logic
