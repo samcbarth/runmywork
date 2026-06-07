@@ -525,9 +525,12 @@ const Sync = (() => {
   // The most recent agent run for a project (powers the Domino's-style tracker).
   async function pullLatestRun(projectId) {
     if (!isConfigured()) return { ok: false, reason: 'not-configured', run: null };
+    // Only surface runs from the last 24h — a completed run from days ago is not
+    // "current" and would otherwise sit in the tracker as if the agent just ran.
+    const since = Date.now() - 24 * 60 * 60 * 1000;
     try {
       const res = await _fetchWithTimeout(
-        `${REST}/agent_runs?project_id=eq.${encodeURIComponent(projectId)}&order=started_at.desc&limit=1`,
+        `${REST}/agent_runs?project_id=eq.${encodeURIComponent(projectId)}&started_at=gt.${since}&order=started_at.desc&limit=1`,
         { headers: HEADERS });
       if (!res.ok) return { ok: false, reason: `http-${res.status}`, run: null };
       const rows = await res.json();
@@ -558,9 +561,19 @@ const Sync = (() => {
     if (remaining > 0 && !opts.force) return { triggered: false, remainingMs: remaining };
     localStorage.setItem(_TRIGGER_KEY, String(Date.now()));
     try {
+      // Target a specific project (and force the "needs it" filter off) so the
+      // cloud run actually works that project — otherwise mode=auto picks none.
+      const payload = {};
+      if (opts.projectId) payload.project_id = opts.projectId;
+      if (opts.force)     payload.mode       = 'force';
       const res = await fetch(`${SUPABASE_URL}/functions/v1/trigger-agent`, {
         method: 'POST',
-        headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` }
+        headers: {
+          apikey: SUPABASE_ANON_KEY,
+          Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
       });
       return { triggered: res.ok, remainingMs: 0, status: res.status };
     } catch (e) {

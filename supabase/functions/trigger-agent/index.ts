@@ -31,6 +31,14 @@ serve(async (req) => {
     });
   }
 
+  // App may target a specific project (and force the "needs it" filter off) by
+  // POSTing { project_id, mode }. These map to the workflow_dispatch inputs in
+  // agent.yml so the run actually works that project instead of auto-picking none.
+  const reqBody = await req.json().catch(() => ({}));
+  const inputs: Record<string, string> = {};
+  if (reqBody.project_id) inputs.project_id = String(reqBody.project_id);
+  if (reqBody.mode)       inputs.mode       = String(reqBody.mode);
+
   const res = await fetch(
     `https://api.github.com/repos/${REPO}/actions/workflows/${WORKFLOW}/dispatches`,
     {
@@ -41,7 +49,7 @@ serve(async (req) => {
         'X-GitHub-Api-Version':  '2022-11-28',
         'Content-Type':          'application/json'
       },
-      body: JSON.stringify({ ref: 'main' })
+      body: JSON.stringify({ ref: 'main', inputs })
     }
   );
 

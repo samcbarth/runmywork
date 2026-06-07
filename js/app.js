@@ -1,6 +1,6 @@
 const App = (() => {
   // Bumped on each deploy so you can confirm which build is live (shown in Settings).
-  const BUILD = '2026-06-06 · live agent timer chip';
+  const BUILD = '2026-06-06 · targeted runs + auto-stage tracker';
 
   let _timerInterval = null;
   let _swRegistration = null;
@@ -252,7 +252,10 @@ const App = (() => {
   async function runAgentNow() {
     const chip = document.getElementById('agent-chip');
     if (chip) chip.classList.add('running');
-    const res = await Sync.triggerAgent({ force: true });
+    // If we're on a project page, target THAT project so the run actually works it.
+    const m = location.hash.match(/project\/([^/?]+)/);
+    const projectId = m ? m[1] : null;
+    const res = await Sync.triggerAgent({ force: true, projectId });
     if (res.triggered) _agentRunUntil = Date.now() + 120000;
     showAgentStatus(res);
     _renderAgentChip();

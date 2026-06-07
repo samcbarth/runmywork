@@ -52,6 +52,38 @@ function describeCall(name, args) {
   }
 }
 
+// Map each tool to the workflow stage it represents, so the tracker advances
+// from real tool activity even when the model never calls stage() itself.
+const TOOL_STAGE_MAP = {
+  web_search: 'look', fetch_url: 'look', read_file: 'look',
+  find_in_file: 'look', files: 'look',
+  note: 'think', save_artifact: 'think', delegate: 'think',
+  write_file: 'do', git: 'do', shell: 'do', github: 'do',
+  verify: 'review',
+  propose: 'report'
+};
+const STAGE_ORDER = ['look', 'think', 'do', 'review', 'revise', 'report'];
+
+// Move the tracker stage forward (never backward) based on the tool just run.
+async function autoAdvanceStage(ctx, toolName) {
+  if (!ctx.run) return;
+  const inferred = TOOL_STAGE_MAP[toolName];
+  if (!inferred) return;
+  const curIdx = STAGE_ORDER.indexOf(ctx.currentStage);
+  const newIdx = STAGE_ORDER.indexOf(inferred);
+  if (newIdx <= curIdx) return;
+  ctx.currentStage = inferred;
+  const pct = Math.round(((newIdx + 1) / STAGE_ORDER.length) * 100);
+  ctx.run.percent = Math.max(ctx.run.percent || 0, pct);
+  ctx.run.stages = ctx.run.stages || [];
+  ctx.run.stages.push({ stage: inferred, enteredAt: Date.now(), note: `auto:${toolName}` });
+  try {
+    await ctx.sb.updateRun(ctx.run.id, {
+      stage: inferred, percent: ctx.run.percent, stages: ctx.run.stages
+    });
+  } catch { /* tracker is best-effort */ }
+}
+
 function boardSystemPrompt() {
   return `You are the planning agent inside RunMyWork, a personal project hub. You see
 the WHOLE board — every open project — and your job is to decide where effort
@@ -74,7 +106,6 @@ function systemPrompt(project, config) {
   const hasProjectRoot = Boolean(config && config.projectRoot);
   const canWrite       = hasProjectRoot && (config.allowFileWrite);
   const canCommit      = canWrite && config.allowGitWrite;
-  const usingGroq      = Boolean(config && config.groqKey);
 
   const execBlock = hasProjectRoot ? `
 REAL PROJECT FILES ARE ACCESSIBLE. Execution rules (strict):
@@ -88,20 +119,24 @@ REAL PROJECT FILES ARE ACCESSIBLE. Execution rules (strict):
 8. Never commit .env files or secrets.
 ` : '';
 
-  // Groq/llama models misfire into XML hermes format when the system prompt quotes
-  // tool names directly (e.g. 'call the "stage" tool'). Keep the prompt clean.
-  const progressNote = usingGroq
-    ? 'Work step by step. Finish by summarising what you did and what changed.'
-    : 'Show progress via the stage tool (look→think→do→review→revise→report). Finish with done.';
+  // The tracker advances automatically from real tool usage (see autoAdvanceStage),
+  // so the prompt no longer needs to force stage() calls. Keep it Groq-safe: quoting
+  // tool names with parens makes Groq/llama misfire into XML hermes format.
+  const progressNote = 'Work step by step through the phases look → think → do → review → revise → report. Finish by calling done with an honest summary of what you changed.';
 
   return `You are an autonomous work agent inside RunMyWork, a personal project hub.
 You are given ONE project and a goal. Make real progress using the available tools, then stop.
 
 Rules:
+- You are a WORKER, not an advisor. Do the work — never write prose about what
+  someone should do. If you catch yourself writing "I will…" or "I recommend…",
+  stop and call a tool instead. Suggestions are only acceptable when the work is
+  genuinely BLOCKED (missing access, external dependency); otherwise, act.
+- Each step: pick ONE concrete action, call ONE tool, read the result, then pick
+  the next action. Keep going until the criterion is actually advanced.
 - The PROJECT SPEC (goal + success criteria) is your north star. Every run should move
   at least one success criterion closer to met. If the project has no spec yet, your job
   is to research it and propose one (action set_spec).
-- Take action — don't describe what you would do.
 - Record findings with the note tool so they persist for next time.
 - Save research and drafts with the save_artifact tool.
 ${hasProjectRoot ? `- A REAL CODE REPOSITORY is connected. Prefer concrete execution over talk: when a
@@ -176,7 +211,13 @@ async function runLoop(opts) {
   // Only the top loop on a real project owns a tracker run. Best-effort: if the
   // table/insert fails, ctx.run stays null and the loop runs exactly as before.
   if (depth === 0 && project) {
-    try { ctx.run = await sb.createRun(project.id); } catch { ctx.run = null; }
+    try {
+      ctx.run = await sb.createRun(project.id);
+      if (!ctx.run) log('  ⚠ tracker: createRun returned null — tracker will be silent this run');
+    } catch (e) {
+      log(`  ⚠ tracker: createRun threw: ${e.message} — tracker will be silent this run`);
+      ctx.run = null;
+    }
   }
   const runLog = [];
   async function pushRunLog(line) {
@@ -331,6 +372,10 @@ async function runLoop(opts) {
       if (name !== 'stage') {
         const errored = typeof result === 'string' && result.includes('"error"');
         await pushRunLog(`${describeCall(name, args)}${errored ? ' — error' : ''}`);
+        // Auto-advance the tracker stage from what the agent actually did. The
+        // model rarely calls stage() on its own, so the bar would otherwise sit
+        // at "look" the whole run. Stage only moves FORWARD (max of current/new).
+        await autoAdvanceStage(ctx, name);
       }
 
       // build_tool may have grown the toolset

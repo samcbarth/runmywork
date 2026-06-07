@@ -11,6 +11,7 @@ Views.Approvals = (() => {
       case 'set_spec':            return `Set project spec (${Array.isArray(p.successCriteria) ? p.successCriteria.length : 0} success criteria)`;
       case 'update_description':  return 'Update project description & summary';
       case 'mark_criterion_done': return `Criterion done: "${(p.criterion || '').slice(0, 60)}"`;
+      case 'mark_task_done':      return `Mark task done: "${(p.task_text || '').slice(0, 60)}"`;
       default:                    return a.action_type;
     }
   }
@@ -34,6 +35,12 @@ Views.Approvals = (() => {
       return [
         p.criterion ? `<p class="approval-detail-note"><strong>Criterion:</strong> ${Models.escapeHtml(p.criterion)}</p>` : '',
         p.evidence  ? `<div class="approval-detail-note"><strong>Evidence:</strong><div class="worklog-detail" style="margin-top:4px;">${Models.escapeHtml(p.evidence)}</div></div>` : ''
+      ].filter(Boolean).join('');
+    }
+    if (a.action_type === 'mark_task_done') {
+      return [
+        p.task_text ? `<p class="approval-detail-note"><strong>Task:</strong> ${Models.escapeHtml(p.task_text)}</p>` : '',
+        p.note      ? `<div class="approval-detail-note"><strong>What was done:</strong><div class="worklog-detail" style="margin-top:4px;">${Models.escapeHtml(p.note)}</div></div>` : ''
       ].filter(Boolean).join('');
     }
     if (a.action_type === 'set_spec') {
@@ -169,6 +176,18 @@ Views.Approvals = (() => {
           detail: { criterion: p.criterion, evidence: p.evidence }
         });
         return true;   // context rows written directly; no project mutation
+      }
+      case 'mark_task_done': {
+        if (!p.task_text) return false;
+        const tasks = project.tasks || [];
+        const needle = p.task_text.toLowerCase().slice(0, 50);
+        // Match the open task whose text contains the proposed text (fuzzy — the
+        // agent may quote a slightly trimmed version of the task).
+        const target = tasks.find(t => !t.done && t.text.toLowerCase().includes(needle))
+          || tasks.find(t => t.text.toLowerCase().includes(needle));
+        if (!target) return false;   // task not found — don't silently swallow
+        target.done = true;
+        break;
       }
       default:
         return false;

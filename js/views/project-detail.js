@@ -220,6 +220,7 @@ Views.ProjectDetail = (() => {
       case 'add_link':            return `Add link: ${p.label || p.url || ''}`;
       case 'update_description':  return 'Update project description & summary';
       case 'mark_criterion_done': return `Criterion done: "${(p.criterion || '').slice(0, 60)}"`;
+      case 'mark_task_done':      return `Mark task done: "${(p.task_text || '').slice(0, 60)}"`;
       default:                    return a.action_type;
     }
   }
@@ -239,6 +240,12 @@ Views.ProjectDetail = (() => {
       return [
         p.criterion ? `<div style="font-size:0.82rem;color:var(--text-2);"><strong>Criterion:</strong> ${Models.escapeHtml(p.criterion)}</div>` : '',
         p.evidence  ? `<div class="worklog-detail" style="font-size:0.82rem;margin-top:4px;">${Models.escapeHtml(p.evidence.slice(0, 300))}${p.evidence.length > 300 ? '…' : ''}</div>` : ''
+      ].filter(Boolean).join('');
+    }
+    if (a.action_type === 'mark_task_done') {
+      return [
+        p.task_text ? `<div style="font-size:0.82rem;color:var(--text-2);"><strong>Task:</strong> ${Models.escapeHtml(p.task_text)}</div>` : '',
+        p.note      ? `<div class="worklog-detail" style="font-size:0.82rem;margin-top:4px;">${Models.escapeHtml(p.note.slice(0, 300))}${p.note.length > 300 ? '…' : ''}</div>` : ''
       ].filter(Boolean).join('');
     }
     if (a.rationale) return `<span style="font-size:0.82rem;color:var(--text-2);">${Models.escapeHtml(a.rationale)}</span>`;
@@ -581,7 +588,11 @@ Views.ProjectDetail = (() => {
     const project = Store.getProject(projectId);
     if (!project) return;
     project.aiRequested = true;
-    Store.saveProject(project);   // syncs to Supabase; the local advisor picks it up on its next run
+    Store.saveProject(project);   // syncs to Supabase; the agent reads ai_requested on its run
+    // Fire a cloud run immediately, targeting this project, so the user sees the
+    // tracker move now instead of waiting for the next scheduled sweep.
+    Sync.triggerAgent({ force: true, projectId }).catch(() => {});
+    // render() → loadRun() starts the discovery poll that catches the new run's tracker.
     render(projectId);
   }
 
