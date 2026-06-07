@@ -540,6 +540,23 @@ const Sync = (() => {
     }
   }
 
+  // Recent agent runs across ALL projects — feeds the global run watcher that
+  // fires "agent started / finished" notifications no matter which page is open.
+  // Filtered by updated_at so a run that just changed state surfaces immediately.
+  async function pullRecentRuns(sinceMs, limit = 20) {
+    if (!isConfigured()) return { ok: false, reason: 'not-configured', runs: [] };
+    const since = Date.now() - (sinceMs || 6 * 60 * 60 * 1000);
+    try {
+      const res = await _fetchWithTimeout(
+        `${REST}/agent_runs?updated_at=gt.${since}&order=updated_at.desc&limit=${limit}&select=id,project_id,status,stage,summary,started_at,updated_at`,
+        { headers: HEADERS });
+      if (!res.ok) return { ok: false, reason: `http-${res.status}`, runs: [] };
+      return { ok: true, runs: await res.json() };
+    } catch (e) {
+      return { ok: false, reason: e.name === 'AbortError' ? 'timeout' : e.message, runs: [] };
+    }
+  }
+
   // Fire-and-forget: call the edge function to dispatch a GitHub Actions run.
   // 20-minute client-side cooldown prevents hammering on every page refresh.
   const _TRIGGER_KEY = 'rmw_last_trigger';
@@ -584,7 +601,7 @@ const Sync = (() => {
   return {
     pull, push, pushProject, remove,
     pullApprovals, decideApproval, addWorklog, pullWorklog,
-    pullContext, addContext, pullLatestRun, pullErrorLog,
+    pullContext, addContext, pullLatestRun, pullRecentRuns, pullErrorLog,
     isConfigured, rowToProject, projectToRow,
     triggerAgent, triggerCooldownRemaining, triggerLastAt
   };

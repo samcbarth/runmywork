@@ -388,7 +388,13 @@ async function main() {
       const result = await runForProject(services, project, args.project ? args.goal : undefined, args.budget);
       if (result && result.committed) {
         handoff.committed = true;
-        if (result.runId) handoff.runs.push(result.runId);
+        // Per-run objects so deploy-verify can file a criterion-review proposal
+        // against the right project once the change is confirmed live.
+        if (result.runId) handoff.runs.push({
+          runId: result.runId,
+          projectId: project.id,
+          criteriaAdvanced: result.criteriaAdvanced || ''
+        });
         if (result.visualSummary && !handoff.visualSummary) handoff.visualSummary = result.visualSummary;
         if (Array.isArray(result.changedFiles)) handoff.changedFiles.push(...result.changedFiles);
         if (result.summary && !handoff.summary) handoff.summary = result.summary;

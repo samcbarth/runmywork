@@ -1,6 +1,6 @@
 const App = (() => {
   // Bumped on each deploy so you can confirm which build is live (shown in Settings).
-  const BUILD = '2026-06-07 · deploy-aware 7-stage tracker';
+  const BUILD = '2026-06-07 · run notifications + review handoff';
 
   let _timerInterval = null;
   let _swRegistration = null;
@@ -261,6 +261,88 @@ const App = (() => {
     _renderAgentChip();
   }
 
+  /* ── Global agent-run watcher (notifications on start / complete) ── */
+  // Polls agent_runs across ALL projects so the user gets notified when a cloud
+  // run starts and when it finishes — regardless of which page is open. Foreground
+  // only: closed-app delivery would need Web Push (not wired). State is kept in
+  // localStorage as { runId: status } so we only notify on real transitions.
+
+  let _runWatchTimer = null;
+  let _runWatchSeeded = false;
+  const _RUN_STATE_KEY = 'rmw_run_states';
+
+  function _loadRunStates() {
+    try { return JSON.parse(localStorage.getItem(_RUN_STATE_KEY) || '{}'); } catch { return {}; }
+  }
+  function _saveRunStates(s) {
+    // Cap the map so it can't grow forever (drop oldest-inserted keys).
+    const keys = Object.keys(s);
+    if (keys.length > 40) keys.slice(0, keys.length - 40).forEach(k => delete s[k]);
+    localStorage.setItem(_RUN_STATE_KEY, JSON.stringify(s));
+  }
+  function _projectTitle(id) {
+    const p = Store.getProject(id);
+    return p ? p.title : 'a project';
+  }
+
+  async function _watchAgentRunsTick() {
+    if (!Sync.isConfigured()) return;
+    const settings = Store.getSettings();
+    const canNotify = settings.notificationsEnabled
+      && typeof Notification !== 'undefined' && Notification.permission === 'granted';
+
+    const { ok, runs } = await Sync.pullRecentRuns(2 * 60 * 60 * 1000, 20);   // last 2h
+    if (!ok) return;
+    const states = _loadRunStates();
+
+    // First tick after load: seed the snapshot WITHOUT notifying, so runs that
+    // already finished before the app opened don't fire a burst of stale alerts.
+    if (!_runWatchSeeded) {
+      runs.forEach(r => { states[r.id] = r.status; });
+      _saveRunStates(states);
+      _runWatchSeeded = true;
+      return;
+    }
+
+    let completed = false;
+    for (const r of runs) {
+      const prev = states[r.id];
+      if (prev === r.status) continue;
+      const title = _projectTitle(r.project_id);
+      if (canNotify) {
+        if (!prev && r.status === 'running') {
+          Notifications.notifyAgentRun({ title: '🤖 Agent started',
+            body: `Working on ${title}…`, projectId: r.project_id, tag: `rmw-run-${r.id}` });
+        } else if (r.status === 'done' && prev !== 'done') {
+          Notifications.notifyAgentRun({ title: '✅ Agent finished — review & approve',
+            body: `${title}: ${(r.summary || 'Work complete').split('\n')[0].slice(0, 80)}`,
+            projectId: r.project_id, tag: `rmw-run-${r.id}` });
+        } else if (r.status === 'failed' && prev !== 'failed') {
+          Notifications.notifyAgentRun({ title: '⚠ Agent run failed',
+            body: `${title} — open to see the error log.`, projectId: r.project_id, tag: `rmw-run-${r.id}` });
+        }
+      }
+      if (r.status === 'done' && prev !== 'done') completed = true;
+      states[r.id] = r.status;
+    }
+    _saveRunStates(states);
+
+    // A run finishing usually files a review proposal (mark_criterion_done). Pull
+    // the inbox so the badge + approvals refresh without a manual reload.
+    if (completed) {
+      await Sync.pullApprovals().catch(() => {});
+      Views.Approvals.updateBadge();
+      Views.Approvals.notifyCriterionReview();
+      if (location.hash.replace(/^#\/?/, '') === 'approvals') Views.Approvals.render();
+    }
+  }
+
+  function _startRunWatch() {
+    _watchAgentRunsTick();
+    if (_runWatchTimer) clearInterval(_runWatchTimer);
+    _runWatchTimer = setInterval(_watchAgentRunsTick, 12000);
+  }
+
   function getBuild() { return BUILD; }
 
   /* ── Init ── */
@@ -290,6 +372,7 @@ const App = (() => {
       _renderAgentChip();
     });
     _startAgentChipTicker();
+    _startRunWatch();   // notify on agent run start / completion (any page)
 
     _handleRoute();
   }

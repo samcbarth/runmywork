@@ -41,6 +41,36 @@ const Notifications = (() => {
     Store.saveSettings(settings);
   }
 
+  // Fire a notification about an agent run (started / finished / failed). Uses the
+  // SW registration when available so a click can reopen the project (see sw.js
+  // notificationclick → OPEN_PROJECT); falls back to a page Notification otherwise.
+  async function notifyAgentRun({ title, body, projectId, tag }) {
+    if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+    const opts = {
+      body,
+      icon: './icons/icon-192.png',
+      badge: './icons/icon-192.png',
+      data: { projectId },
+      tag: tag || 'rmw-agent-run',
+      renotify: true,
+      requireInteraction: false
+    };
+    let reg = null;
+    try { reg = await navigator.serviceWorker?.ready; } catch { /* no SW */ }
+    try {
+      if (reg) {
+        await reg.showNotification(title, opts);
+      } else {
+        const n = new Notification(title, opts);
+        n.onclick = () => {
+          window.focus();
+          if (projectId) App.navigate(`project/${projectId}`);
+          n.close();
+        };
+      }
+    } catch { /* silent */ }
+  }
+
   async function requestPermission() {
     if (typeof Notification === 'undefined') return 'unsupported';
     const perm = await Notification.requestPermission();
@@ -60,5 +90,5 @@ const Notifications = (() => {
     } catch { /* not supported */ }
   }
 
-  return { checkOnOpen, requestPermission, tryRegisterPeriodicSync };
+  return { checkOnOpen, requestPermission, tryRegisterPeriodicSync, notifyAgentRun };
 })();
