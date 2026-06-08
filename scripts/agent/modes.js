@@ -105,9 +105,11 @@ const MODES = {
     goalFragment:
       'IMPLEMENTATION MODE (writes code). Execute the APPROVED plan and nothing beyond ' +
       'it. Make the real change: read_file to inspect, write_file to edit, verify to ' +
-      'check syntax, then git add + git commit. Stay strictly within the approved scope ' +
-      '— if you discover the plan was wrong, stop and report rather than expanding scope. ' +
-      'Finish by calling done with what you changed and set next_mode to "validation".',
+      'check syntax, then git add + git commit. Stay strictly within the approved scope. ' +
+      'If you discover the plan was WRONG or the task is BIGGER than expected, STOP — do ' +
+      'NOT force a partial or hacky commit. Call done with next_mode "planning" and explain ' +
+      'what changed, so the task is re-decomposed and re-approved. Otherwise finish by ' +
+      'calling done with what you changed and set next_mode to "validation".',
     promptFragment: null   // use the default executor prompt (with deploy note)
   },
 
@@ -135,8 +137,10 @@ const MODES = {
       'context — those are the success criteria the user marked FAILED in review, with ' +
       'their feedback. Fix ONLY those criteria; do NOT touch criteria already marked met ' +
       'and do not add new scope. Apply targeted corrections (read_file → write_file → ' +
-      'verify → git commit) that directly address the user feedback. Finish by calling ' +
-      'done with what you fixed and set next_mode to "validation" so the fix is re-checked.',
+      'verify → git commit) that directly address the user feedback. If the fix turns out ' +
+      'to need a bigger rethink than a targeted correction, STOP and call done with ' +
+      'next_mode "planning" instead of forcing it. Otherwise finish by calling done with ' +
+      'what you fixed and set next_mode to "validation" so the fix is re-checked.',
     promptFragment: null
   },
 

@@ -185,6 +185,19 @@ ${showExec ? `- A REAL CODE REPOSITORY is connected. Prefer concrete execution o
 Project state changes (tasks, status, priority) require human approval. Use the propose tool
 to file a proposal — never apply state changes directly.
 
+DISCERNMENT — when you call done, choose next_mode deliberately (not just the default next):
+- The work spans more than one file, more than one distinct step, or is vague/underscoped
+  → next_mode "planning". Break it down into small, clear, reviewable tasks FIRST; do not
+  half-implement a fuzzy task.
+- You just wrote/changed code → next_mode "validation". ALWAYS verify after writing.
+- Validation found problems → "revision". Validation passed → "deployment".
+- The change is committed and shipped → "reporting".
+- Unresolved tasks or FAILED success criteria still remain → "planning" to tackle the next one.
+  Everything is met → say the objective is complete and leave next_mode empty.
+- Do NOT start a new task while the CURRENT task has unmet or failed success criteria. Finish
+  it and let the human approve those criteria before moving on.
+- You NEVER mark a success criterion met yourself — that is the human's approval step.
+
 ${progressNote}
 
 Project: "${project ? project.title : '(board-level)'}".`;
@@ -381,7 +394,11 @@ async function runLoop(opts) {
         // Gate 1 — goal asked for a code change but nothing was written.
         const goalAsksForWrite = /patch|edit|write|modify|change|update|add.*line|remove.*line|wire up/i.test(opts.goal || '');
         const didWrite = (ctx.changedFiles || []).length > 0;
-        if (goalAsksForWrite && !didWrite && steps < budget - 1) {
+        // Escape hatch: if the model deliberately escalated to a non-write mode
+        // (the task was wrong/too big and should be re-planned), respect that and
+        // do NOT force a write — that's the intended "bounce back to planning" path.
+        const escalated = ['planning', 'discovery', 'analysis'].includes(ctx.nextMode);
+        if (goalAsksForWrite && !didWrite && !escalated && steps < budget - 1) {
           ctx.done = false;
           // Answer the done tool_call FIRST — OpenAI rejects the next request if any
           // tool_call_id is left without a matching tool message.

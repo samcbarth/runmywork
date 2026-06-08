@@ -9,7 +9,7 @@ module.exports = {
       summary: { type: 'string', description: 'Concise summary of what was done and proposed.' },
       criteria_advanced: { type: 'string', description: 'Which success criterion you advanced this run, and whether it is now met. Empty if none.' },
       visual_summary: { type: 'string', description: 'For UI changes: what the change looks like now and where it appears on the page (view, section, layout, fields, buttons, empty/loading states). Empty if no visible change.' },
-      next_mode: { type: 'string', enum: ['discovery', 'analysis', 'planning', 'approval_request', 'implementation', 'validation', 'revision', 'deployment', 'reporting'], description: 'The action mode that should run next. Defaults to this mode’s natural successor if omitted.' },
+      next_mode: { type: 'string', enum: ['discovery', 'analysis', 'planning', 'approval_request', 'implementation', 'validation', 'revision', 'deployment', 'reporting'], description: 'The action mode that should run next. CHOOSE by this rubric, do not just pick the default successor: work spans >1 file OR >1 step OR is vague/underscoped → "planning" (break it down first). Plan + small clear tasks filed → "approval_request". Human authorized the write phase → "implementation". You just wrote code → "validation" (ALWAYS verify after writing). Validation found failures → "revision"; validation passed → "deployment". Committed & shipped → "reporting". Unresolved tasks or failed criteria remain → "planning" for the next item; everything met → objective complete (leave empty). NEVER move on to a new task while the current one has unmet/failed criteria.' },
       next_rationale: { type: 'string', description: 'One line on why that mode comes next.' }
     },
     required: ['summary']

@@ -212,9 +212,24 @@ function partitionSpec(rows) {
     specText: specLines.join('\n'),
     hasGoal: Boolean(goal) || criteria.length > 0,
     criteria,
+    status,          // [{text, state:'met'|'failed'|'open', feedback?}] — for focus selection
     openWorkText,
     background
   };
+}
+
+// Pick the SINGLE highest-priority unresolved item the run should focus on, so
+// the agent finishes/repairs one thing before touching anything else. Priority:
+// failed criterion (with feedback) > unmet criterion > first open task.
+function pickFocus(spec, project) {
+  const status = (spec && spec.status) || [];
+  const failed = status.find(s => s.state === 'failed');
+  if (failed) return `Failed success criterion — "${failed.text}"${failed.feedback ? `\n  User feedback: ${failed.feedback}` : ''}`;
+  const open = status.find(s => s.state === 'open');
+  if (open) return `Unmet success criterion — "${open.text}"`;
+  const openTask = ((project && project.tasks) || []).find(t => !t.done);
+  if (openTask) return `Open task — "${openTask.text}"`;
+  return '';
 }
 
 // Build the ordered context fed to the loop: SPEC → WHERE YOU LEFT OFF → BACKGROUND →
@@ -283,6 +298,10 @@ async function pickMode(sb, project, spec, override) {
 // criteria / open tasks give it something concrete to work on.
 function buildModeGoal(mode, spec, project, config) {
   const parts = [mode.goalFragment];
+  // Task-level focus: name the ONE unresolved item this run should advance, so the
+  // agent doesn't spread itself across everything open.
+  const focus = pickFocus(spec, project);
+  if (focus) parts.push(`FOCUS THIS RUN ON THIS ONE ITEM (finish or repair it before starting anything else):\n${focus}`);
   if (spec.criteria && spec.criteria.length) {
     parts.push('Success criteria:\n' + spec.criteria.map((c, i) => `  ${i + 1}. ${c}`).join('\n'));
   }
