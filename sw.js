@@ -1,4 +1,4 @@
-const CACHE = 'runmywork-v30';
+const CACHE = 'runmywork-v31';
 const PRECACHE = [
   './',
   './index.html',
@@ -146,6 +146,24 @@ function _idbGetAll(store) {
     req.onerror = reject;
   });
 }
+
+/* ── Web Push (closed-app delivery from the cloud agent) ── */
+
+self.addEventListener('push', e => {
+  let data = {};
+  try { data = e.data ? e.data.json() : {}; } catch { data = { title: 'RunMyWork', body: e.data ? e.data.text() : '' }; }
+  const title = data.title || 'RunMyWork';
+  e.waitUntil(
+    self.registration.showNotification(title, {
+      body: data.body || '',
+      icon: './icons/icon-192.png',
+      badge: './icons/icon-192.png',
+      data: { projectId: data.projectId || null },
+      tag: data.tag || 'rmw-push',
+      renotify: true
+    })
+  );
+});
 
 /* ── Notification click ── */
 

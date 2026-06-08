@@ -176,6 +176,11 @@ module.exports = {
       : action === 'authorize_mode' ? `authorize ${payload.mode} phase`
       : `link ${payload.label}`;
     ctx.proposals.push(desc);
+    try {
+      const { sendPush } = require('../notify');
+      sendPush({ title: '📥 New proposal to approve', body: `${target.title}: ${desc}`,
+        projectId: target.id, tag: `rmw-proposal-${target.id}` });
+    } catch { /* best effort */ }
     return { ok: true, proposed: desc, note: 'Filed for human approval in the app inbox.' };
   }
 };

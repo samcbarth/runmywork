@@ -17,6 +17,7 @@ const fs = require('fs');
 const path = require('path');
 const { loadTools, toSchemas, dispatch } = require('./registry');
 const { verifyFile } = require('./tools/verify');
+const { sendPush } = require('./notify');
 
 const WORK = path.join(__dirname, 'work');
 
@@ -87,6 +88,13 @@ async function autoAdvanceStage(ctx, toolName) {
       stage: inferred, percent: ctx.run.percent, stages: ctx.run.stages
     });
   } catch { /* tracker is best-effort */ }
+  // Notify on every forward stage move (fires once per stage since this only
+  // runs when the stage actually advances).
+  if (ctx.project) {
+    const label = { planning: 'Planning', editing: 'Editing', testing: 'Testing' }[inferred] || inferred;
+    sendPush({ title: `🔧 ${ctx.project.title}`, body: `Agent moved to ${label}`,
+      projectId: ctx.project.id, tag: `rmw-stage-${ctx.project.id}` });
+  }
 }
 
 function boardSystemPrompt() {
@@ -239,6 +247,8 @@ async function runLoop(opts) {
     try {
       ctx.run = await sb.createRun(project.id, mode && mode.id);
       if (!ctx.run) log('  ⚠ tracker: createRun returned null — tracker will be silent this run');
+      else sendPush({ title: '🤖 Agent started', body: `Working on ${project.title}${mode ? ` — ${mode.label}` : ''}…`,
+        projectId: project.id, tag: `rmw-run-${ctx.run.id}` });
     } catch (e) {
       log(`  ⚠ tracker: createRun threw: ${e.message} — tracker will be silent this run`);
       ctx.run = null;
@@ -466,6 +476,15 @@ async function runLoop(opts) {
           summary: (ctx.doneSummary || '').slice(0, 1000),
           ended_at: Date.now()
         });
+        // Notify the close-out. A handed-off (committed) run is NOT finalised here —
+        // deploy-verify.js sends its awaiting-review / complete push instead.
+        if (modelErrored) {
+          sendPush({ title: '⚠ Agent run failed', body: `${project.title} — open to see the error log.`,
+            projectId: project.id, tag: `rmw-run-${ctx.run.id}` });
+        } else {
+          sendPush({ title: '✅ Agent finished', body: `${project.title}: ${(ctx.doneSummary || 'Done').split('\n')[0].slice(0, 80)}`,
+            projectId: project.id, tag: `rmw-run-${ctx.run.id}` });
+        }
       }
     } catch { /* best effort */ }
     // Recommended next mode goes in its own patch so a missing `next_mode` column

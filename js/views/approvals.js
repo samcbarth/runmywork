@@ -17,6 +17,7 @@ Views.Approvals = (() => {
       case 'set_spec':            return `Set project spec (${Array.isArray(p.successCriteria) ? p.successCriteria.length : 0} success criteria)`;
       case 'update_description':  return 'Update project description & summary';
       case 'mark_criterion_done': return `Criterion done: "${(p.criterion || '').slice(0, 60)}"`;
+      case 'review_criteria':     return `Review ${Array.isArray(p.criteria) ? p.criteria.length : 0} success criteria`;
       case 'mark_task_done':      return `Mark task done: "${(p.task_text || '').slice(0, 60)}"`;
       case 'authorize_mode':      return `Authorize ${_modeLabel(p.mode)} phase (agent will modify files)`;
       default:                    return a.action_type;
@@ -72,6 +73,163 @@ Views.Approvals = (() => {
     return '';
   }
 
+  /* ── Success-criteria review (per-criterion pass/fail + feedback) ── */
+
+  // verdict state per review card: { [approvalId]: { [criterionIdx]: 'pass'|'fail' } }
+  const _verdicts = {};
+
+  function _renderCriteriaReview(a) {
+    const p = a.payload || {};
+    const criteria = Array.isArray(p.criteria) ? p.criteria : [];
+    // Seed verdicts once: default every criterion to "pass" (the human flips the
+    // ones that actually failed). Met / advanced ones start as pass too.
+    if (!_verdicts[a.id]) {
+      _verdicts[a.id] = {};
+      criteria.forEach((c, i) => { _verdicts[a.id][i] = 'pass'; });
+    }
+    const v = _verdicts[a.id];
+
+    const rows = criteria.map((c, i) => {
+      const verdict = v[i] || 'pass';
+      const badge = c.met
+        ? `<span class="creview-badge met">previously met</span>`
+        : (c.advancedThisRun ? `<span class="creview-badge adv">worked this run</span>` : '');
+      return `
+        <div class="creview-row" data-crit-idx="${i}">
+          <div class="creview-text">${Models.escapeHtml(c.text || '')} ${badge}</div>
+          <div class="creview-toggle">
+            <button class="btn btn-sm creview-pass${verdict === 'pass' ? ' active' : ''}"
+              onclick="Views.Approvals._setVerdict('${a.id}',${i},'pass')">✓ Pass</button>
+            <button class="btn btn-sm creview-fail${verdict === 'fail' ? ' active' : ''}"
+              onclick="Views.Approvals._setVerdict('${a.id}',${i},'fail')">✗ Fail</button>
+          </div>
+          <textarea class="creview-feedback${verdict === 'fail' ? '' : ' hidden'}" data-crit-fb="${i}"
+            placeholder="What's wrong / what the agent should fix"></textarea>
+        </div>`;
+    }).join('');
+
+    const report = p.deployReport
+      ? `<details class="creview-report"><summary>Deploy report</summary><div class="worklog-detail">${Models.escapeHtml(p.deployReport)}</div></details>`
+      : '';
+    const visual = p.visualSummary
+      ? `<p class="approval-detail-note"><strong>What changed:</strong> ${Models.escapeHtml(p.visualSummary)}</p>`
+      : '';
+
+    return `
+      <div class="section-card creview-card" style="margin-top:10px;">
+        <div class="section-header">
+          <span class="section-title">${Models.escapeHtml(_summary(a))}</span>
+        </div>
+        ${a.rationale ? `<p class="advisor-next">${Models.escapeHtml(a.rationale)}</p>` : ''}
+        ${visual}
+        <div class="creview-list">${rows}</div>
+        ${report}
+        <div style="margin-top:12px;">
+          <button class="btn btn-success" onclick="Views.Approvals.submitCriteriaReview('${a.id}')">Submit review</button>
+        </div>
+      </div>`;
+  }
+
+  // Flip a criterion's pass/fail and show/hide its feedback box (no full re-render).
+  function _setVerdict(approvalId, idx, verdict) {
+    _verdicts[approvalId] = _verdicts[approvalId] || {};
+    _verdicts[approvalId][idx] = verdict;
+    // Scope to the right card: find the one whose markup carries this approval id.
+    const cards = document.querySelectorAll('.creview-card');
+    cards.forEach(card => {
+      if (!card.innerHTML.includes(`'${approvalId}'`)) return;
+      const r = card.querySelector(`.creview-row[data-crit-idx="${idx}"]`);
+      if (!r) return;
+      const pass = r.querySelector('.creview-pass');
+      const fail = r.querySelector('.creview-fail');
+      const fb   = r.querySelector('.creview-feedback');
+      if (pass) pass.classList.toggle('active', verdict === 'pass');
+      if (fail) fail.classList.toggle('active', verdict === 'fail');
+      if (fb)   fb.classList.toggle('hidden', verdict !== 'fail');
+    });
+  }
+
+  // Submit the review: tick passes, feed failures back, complete or flag the run,
+  // and (on any failure) auto-authorize + fire a revision run for the failures.
+  async function submitCriteriaReview(id) {
+    const a = Store.getApprovals().find(x => x.id === id);
+    if (!a) return;
+    const p = a.payload || {};
+    const criteria = Array.isArray(p.criteria) ? p.criteria : [];
+    const v = _verdicts[id] || {};
+
+    // Collect per-criterion feedback from the textareas in this card.
+    const fbByIdx = {};
+    document.querySelectorAll('.creview-card').forEach(card => {
+      if (!card.innerHTML.includes(`'${id}'`)) return;
+      card.querySelectorAll('.creview-feedback').forEach(t => {
+        fbByIdx[t.getAttribute('data-crit-fb')] = (t.value || '').trim();
+      });
+    });
+
+    const failed = [];
+    let passCount = 0;
+    for (let i = 0; i < criteria.length; i++) {
+      const c = criteria[i];
+      const verdict = v[i] || 'pass';
+      if (verdict === 'pass') {
+        passCount++;
+        if (!c.met) {
+          await Sync.addContext({
+            project_id: a.project_id, kind: 'success_criteria_met',
+            content: c.text + (c.evidence ? `\n\nEvidence: ${c.evidence}` : ''),
+            created_by: 'user'
+          });
+        }
+      } else {
+        const fb = fbByIdx[String(i)] || '';
+        failed.push({ text: c.text, feedback: fb });
+        await Sync.addContext({
+          project_id: a.project_id, kind: 'success_criteria_feedback',
+          content: c.text + `\n\nFeedback: ${fb || '(no detail given)'}`,
+          created_by: 'user'
+        });
+      }
+    }
+
+    Sync.addWorklog({
+      project_id: a.project_id, kind: 'action', created_by: 'user',
+      summary: `Criteria review: ${passCount} passed, ${failed.length} failed`,
+      detail: { passed: passCount, failed }
+    });
+
+    await Sync.decideApproval(id, 'applied');
+
+    // Update the run state the tracker shows.
+    if (p.runId) {
+      if (failed.length === 0) {
+        await Sync.updateRun(p.runId, { status: 'done', stage: 'complete', percent: 100, ended_at: Date.now() });
+      } else {
+        await Sync.updateRun(p.runId, { status: 'needs_revision', ended_at: Date.now() });
+      }
+    }
+
+    // Auto-revision: authorize the revision write phase and fire a run that will
+    // work ONLY the failed criteria (it reads the feedback rows from context).
+    if (failed.length > 0) {
+      await Sync.addWorklog({
+        project_id: a.project_id, kind: 'mode_authorized', created_by: 'user',
+        summary: 'Authorized Revision phase (criteria review failures)',
+        detail: { mode: 'revision', plan: `Fix the ${failed.length} failed criterion/criteria using the user feedback.` }
+      });
+      Sync.triggerAgent({ force: true, projectId: a.project_id, actionMode: 'revision' });
+      Notifications.notifyAgentRun({
+        title: '🔧 Revision started',
+        body: `Reworking ${failed.length} failed criterion${failed.length === 1 ? '' : 'a'}.`,
+        projectId: a.project_id, tag: `rmw-revise-${a.project_id}`
+      });
+    }
+
+    delete _verdicts[id];
+    updateBadge();
+    App.refresh();
+  }
+
   async function render() {
     const root = document.getElementById('view-root');
     root.innerHTML = `
@@ -110,7 +268,11 @@ Views.Approvals = (() => {
     container.innerHTML = Object.keys(byProject).map(pid => {
       const project = Store.getProject(pid);
       const title = project ? project.title : '(unknown project)';
-      const rows = byProject[pid].map(a => `
+      const rows = byProject[pid].map(a => {
+        // The criteria review is its own interactive card (pass/fail per criterion
+        // + one Submit), not a plain approve/reject proposal.
+        if (a.action_type === 'review_criteria') return _renderCriteriaReview(a);
+        return `
         <div class="section-card" style="margin-top:10px;">
           <div class="section-header">
             <span class="section-title">${Models.escapeHtml(_summary(a))}</span>
@@ -121,7 +283,8 @@ Views.Approvals = (() => {
             <button class="btn btn-sm btn-success" onclick="Views.Approvals.approve('${a.id}')">✓ Approve</button>
             <button class="btn btn-sm btn-danger" onclick="Views.Approvals.reject('${a.id}')">✕ Reject</button>
           </div>
-        </div>`).join('');
+        </div>`;
+      }).join('');
       return `
         <div style="margin-bottom:18px;">
           <h3 class="card-title" style="cursor:pointer;" onclick="App.navigate('project/${pid}')">${Models.escapeHtml(title)}</h3>
@@ -306,5 +469,6 @@ Views.Approvals = (() => {
     }
   }
 
-  return { render, approve, reject, updateBadge, autoApplyPending, notifyCriterionReview };
+  return { render, approve, reject, updateBadge, autoApplyPending, notifyCriterionReview,
+           submitCriteriaReview, _setVerdict };
 })();
