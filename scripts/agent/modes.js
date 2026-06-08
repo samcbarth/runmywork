@@ -143,13 +143,17 @@ const MODES = {
     allowList: ['read_file', 'git', 'verify', 'note', 'stage', 'done'],
     nextMode: 'reporting',
     goalFragment:
-      'DEPLOYMENT MODE. The validated change is ready to ship. Ensure all work is ' +
-      'committed (git add + git commit). The workflow then pushes, deploys to the live ' +
-      'site, and verifies it is live automatically — you do not push yourself. Finish by ' +
-      'calling done confirming the change is committed and set next_mode to "reporting".',
+      'DEPLOYMENT MODE. The validated change is ready to ship. FIRST run git op:"status". ' +
+      'If the tree is CLEAN, the change was already committed and pushed in the ' +
+      'implementation phase (each phase runs on a fresh checkout of main) — do NOT try to ' +
+      'add or commit; just run git op:"log" to confirm the change is present and call done. ' +
+      'Only if status shows uncommitted changes should you git add + git commit. The ' +
+      'workflow pushes and verifies automatically — you never push yourself. Finish by ' +
+      'calling done and set next_mode to "reporting".',
     promptFragment:
-      'You are in DEPLOYMENT mode. Ensure the validated change is committed; the ' +
-      'workflow handles push + live verification automatically. Then call done.'
+      'You are in DEPLOYMENT mode. Check git status first. A clean tree means the work is ' +
+      'already committed and shipped — confirm with git log and call done; do not attempt ' +
+      'another commit (there is nothing to stage). Only commit if status shows real changes.'
   },
 
   reporting: {

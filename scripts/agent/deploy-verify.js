@@ -44,21 +44,26 @@ function readHandoff() {
   catch { return null; }
 }
 
-// Fetch the live version.json (cache-busted) and return its build id, or null.
+// Fetch the live version.json (cache-busted). Returns { served, build } —
+// served=true means the URL returned 200 (a deploy target exists, even if it's
+// still showing an old build); build is the reported build id or null. A target
+// with no GitHub Pages at all returns served=false (404 / unreachable).
 async function fetchLiveBuild() {
   try {
     const res = await fetch(`${VERSION_URL}?cb=${Date.now()}`, {
       cache: 'no-store',
       headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' }
     });
-    if (!res.ok) return null;
+    if (!res.ok) return { served: false, build: null };
     const json = await res.json().catch(() => null);
-    return json && json.build ? String(json.build) : null;
-  } catch { return null; }
+    return { served: true, build: json && json.build ? String(json.build) : null };
+  } catch { return { served: false, build: null }; }
 }
 
 // Build the human-readable final report the user reads in the tracker.
-function buildReport({ verified, handoff }) {
+// outcome: 'verified' (live confirmed) | 'no_pages' (pushed; target has no Pages
+// to verify against) | 'stuck' (Pages exists but never showed this build).
+function buildReport({ outcome, handoff }) {
   const files = (handoff.changedFiles || []).map(f => f.path || f).filter(Boolean);
   const lines = [];
   lines.push(handoff.summary ? handoff.summary.split('\n')[0] : 'Agent run');
@@ -67,9 +72,15 @@ function buildReport({ verified, handoff }) {
   lines.push(`Files changed: ${files.length ? files.join(', ') : 'none'}`);
   if (handoff.visualSummary) lines.push(`What changed visually: ${handoff.visualSummary}`);
   lines.push(`Commit/push: pushed to main`);
-  lines.push(`Deployment: ${verified ? 'deployed' : 'pushed, deploy not confirmed'}`);
+  const deployLine = outcome === 'verified' ? 'deployed'
+    : outcome === 'no_pages' ? 'pushed (no live site configured on this repo — nothing to deploy to)'
+    : 'pushed, deploy not confirmed';
+  lines.push(`Deployment: ${deployLine}`);
   lines.push(`Live URL checked: ${LIVE_URL}`);
-  lines.push(`Visible live: ${verified ? 'YES — confirmed live' : 'NOT YET — live site did not reflect this build in time'}`);
+  const visibleLine = outcome === 'verified' ? 'YES — confirmed live'
+    : outcome === 'no_pages' ? 'N/A — this repo has no GitHub Pages site, so there is nothing to verify. The change is committed and pushed.'
+    : 'NOT YET — live site did not reflect this build in time';
+  lines.push(`Visible live: ${visibleLine}`);
   return lines.join('\n').slice(0, 1000);
 }
 
@@ -176,24 +187,45 @@ async function main() {
     await sb.updateRun(r.runId, { stage: 'deploying', percent: Math.round((5 / 7) * 100) });
   }
 
-  // Poll the live site until it reports this build (or we time out).
-  const deadline = Date.now() + TIMEOUT_MS;
+  // Poll the live site until it reports this build (or we time out). Track whether
+  // the URL ever served a 200: a repo with NO GitHub Pages (e.g. an external
+  // target site that was never set up) 404s forever — there is nothing to deploy
+  // to, so we must NOT sit here failing for 12 minutes. If we never get a 200
+  // within a short grace window, conclude "no live target" and treat the pushed
+  // commit as the finish line instead of a failure.
+  const NOPAGES_GRACE_MS = parseInt(process.env.DEPLOY_NOPAGES_GRACE_MS || '', 10) || 90 * 1000;
+  const startedAt = Date.now();
+  const deadline  = startedAt + TIMEOUT_MS;
   let verified = false;
+  let everServed = false;
   while (Date.now() < deadline) {
-    const liveBuild = await fetchLiveBuild();
-    if (liveBuild === BUILD_ID) { verified = true; break; }
-    log(`live build = ${liveBuild ?? '(unreachable)'} ≠ ${BUILD_ID} — waiting ${POLL_MS / 1000}s…`);
+    const { served, build } = await fetchLiveBuild();
+    if (served) everServed = true;
+    if (build === BUILD_ID) { verified = true; break; }
+    // Quick exit when there is plainly no Pages site to verify against.
+    if (!everServed && (Date.now() - startedAt) > NOPAGES_GRACE_MS) {
+      log(`No live site responded at ${VERSION_URL} after ${Math.round(NOPAGES_GRACE_MS / 1000)}s — treating the push as the finish line (no Pages on this repo).`);
+      break;
+    }
+    log(`live build = ${build ?? (everServed ? '(no build field)' : '(unreachable)')} ≠ ${BUILD_ID} — waiting ${POLL_MS / 1000}s…`);
     await sleep(POLL_MS);
   }
 
-  const report = buildReport({ verified, handoff });
-  if (verified) {
-    log('✓ Live verified — the change is live on the site.');
+  // verified  → confirmed live.   no_pages → pushed, no live target to verify.
+  // stuck     → a Pages site exists but never showed this build (real failure).
+  const outcome = verified ? 'verified' : (!everServed ? 'no_pages' : 'stuck');
+  const report = buildReport({ outcome, handoff });
+  const shipped = outcome !== 'stuck';   // verified live OR pushed with no live target
+
+  if (shipped) {
+    log(outcome === 'verified'
+      ? '✓ Live verified — the change is live on the site.'
+      : '✓ Pushed — no live site to verify on this repo; treating push as shipped.');
     for (const r of runs) {
       await sb.updateRun(r.runId, { stage: 'live_verified', percent: Math.round((6 / 7) * 100) });
-      // The change is LIVE but the run is NOT complete — the human must sign off
-      // on the success criteria first. File the review and hold the run at
-      // awaiting_review. Only a project with NO criteria completes outright.
+      // Shipped, but the run is NOT complete — the human must sign off on the
+      // success criteria first. File the review and hold at awaiting_review.
+      // Only a project with NO criteria completes outright.
       let review = { hasCriteria: false, filed: false };
       try { review = await ensureCriteriaReview(sb, r.projectId, r.criteriaAdvanced, report, handoff.visualSummary, r.runId); }
       catch (e) { log(`   (criteria review not filed: ${e.message})`); }
@@ -210,14 +242,15 @@ async function main() {
         });
         log(`   ⏸ run ${r.runId} awaiting your criteria review.`);
         await sendPush({ title: '📋 Review needed — confirm success criteria',
-          body: `${title}: the change is live. Mark which criteria passed.`,
+          body: `${title}: ${outcome === 'verified' ? 'the change is live' : 'the change is pushed'}. Mark which criteria passed.`,
           projectId: r.projectId, tag: `rmw-run-${r.runId}` });
       } else {
         await sb.updateRun(r.runId, {
           stage: 'complete', status: 'done', percent: 100,
           summary: report, ended_at: Date.now()
         });
-        await sendPush({ title: '✅ Change is live', body: `${title}: deployed and verified.`,
+        await sendPush({ title: outcome === 'verified' ? '✅ Change is live' : '✅ Change pushed',
+          body: `${title}: ${outcome === 'verified' ? 'deployed and verified.' : 'committed and pushed.'}`,
           projectId: r.projectId, tag: `rmw-run-${r.runId}` });
       }
     }
@@ -236,8 +269,8 @@ async function main() {
 
   // Surface the report in the workflow log too.
   console.log('\n' + report + '\n');
-  // Non-zero exit on failed verification so the workflow run is visibly red.
-  if (!verified) process.exitCode = 1;
+  // Non-zero exit only on a genuine stuck deploy (Pages exists but never updated).
+  if (!shipped) process.exitCode = 1;
 }
 
 main().catch(e => { console.error('[deploy-verify] failed:', e.message); process.exitCode = 1; });
