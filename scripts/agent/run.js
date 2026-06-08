@@ -27,7 +27,7 @@ const { makeSupabase } = require('./supabase');
 const { makeOllama } = require('./ollama');
 const { makeGroq, makeOpenRouter, makeOpenAI, makeChainedProvider } = require('./groq');
 const { runLoop } = require('./loop');
-const { getMode, isWrite, defaultStartMode } = require('./modes');
+const { getMode, isWrite, defaultStartMode, classifyWorker } = require('./modes');
 
 function parseArgs(argv) {
   const a = { _: [] };
@@ -83,6 +83,58 @@ function buildFileTree(root, maxDepth = 2) {
   return lines.join('\n');
 }
 
+// Strip tags + collapse whitespace from an HTML fragment's inner text.
+function visibleText(s) {
+  return String(s || '').replace(/<[^>]+>/g, ' ').replace(/&[a-z]+;/gi, ' ').replace(/\s+/g, ' ').trim().slice(0, 80);
+}
+
+// Build a "what the human actually sees, and WHERE it lives in the source" map by
+// statically scanning the project's HTML. The agent works off the file tree alone
+// otherwise and guesses which tag is "the title" / "the heading" — this grounds
+// user-facing edits to the exact element, and frames approval reviews in terms of
+// what the user sees. No browser needed; it's a light parse of the markup.
+function buildVisibleSurface(root, maxFiles = 8) {
+  const fs = require('fs');
+  const path = require('path');
+  const SKIP = new Set(['.git', 'node_modules', 'work', 'dist', 'build', '.next', '__pycache__']);
+  const htmlFiles = [];
+  function walk(dir, depth) {
+    if (depth > 3) return;
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      if (SKIP.has(e.name) || e.name.startsWith('.')) continue;
+      const fp = path.join(dir, e.name);
+      if (e.isDirectory()) walk(fp, depth + 1);
+      else if (/\.html?$/i.test(e.name)) htmlFiles.push(fp);
+    }
+  }
+  walk(root, 0);
+  if (!htmlFiles.length) return '';
+
+  const rel = (f) => path.relative(root, f).replace(/\\/g, '/');
+  const lines = ['USER-VISIBLE SURFACE MAP — what the human actually sees in the browser and WHERE it lives in the source. When a task mentions something visible (the title, a heading, a button, a label), edit the exact element listed here — do NOT guess which file or tag, and do NOT add a new element when one already exists:'];
+  let used = 0;
+  for (const f of htmlFiles.slice(0, maxFiles)) {
+    let html = '';
+    try { html = fs.readFileSync(f, 'utf8'); } catch { continue; }
+    const r = rel(f);
+    const fileLines = [];
+    const title = (html.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1];
+    if (title) fileLines.push(`    - Browser tab title: "${visibleText(title)}"  ← <title> element`);
+    for (const m of html.matchAll(/<h([1-6])[^>]*>([\s\S]*?)<\/h\1>/gi)) {
+      const t = visibleText(m[2]);
+      if (t) fileLines.push(`    - Heading (h${m[1]}): "${t}"  ← <h${m[1]}> element`);
+    }
+    const btns = [...html.matchAll(/<button[^>]*>([\s\S]*?)<\/button>/gi)].map(m => visibleText(m[2])).filter(t => t && t.length < 40);
+    if (btns.length) fileLines.push(`    - Buttons: ${[...new Set(btns)].slice(0, 10).map(b => `"${b}"`).join(', ')}`);
+    const links = [...html.matchAll(/<a[^>]*>([\s\S]*?)<\/a>/gi)].map(m => visibleText(m[2])).filter(t => t && t.length < 40);
+    if (links.length) fileLines.push(`    - Links: ${[...new Set(links)].slice(0, 8).map(l => `"${l}"`).join(', ')}`);
+    if (fileLines.length) { lines.push(`  ${r}:`); lines.push(...fileLines); used++; }
+  }
+  return used ? lines.join('\n') : '';
+}
+
 // Normalise a criterion string for set-membership comparison. Met rows carry an
 // "\n\nEvidence:" suffix and feedback rows an "\n\nFeedback:" suffix — strip both
 // so a criterion matches across success_criteria / _met / _feedback rows.
@@ -133,6 +185,23 @@ async function selectAutoTargets(sb, projects, force) {
     if (await projectHasLiveWork(sb, p)) out.push(p);
   }
   return out;
+}
+
+// Task-ownership lock: don't start a new autonomous run on a project that already
+// has one in flight or awaiting the human's review. Prevents two runs (e.g. a
+// scheduled sweep and a manual trigger) from double-working the same item.
+//   - a RUNNING run with no ended_at locks for LOCK_TTL_MS (so a crashed run's
+//     stale lock eventually clears),
+//   - an AWAITING_REVIEW run locks indefinitely (it's owned by the pending human
+//     review — no new work until that's resolved).
+async function isProjectLocked(sb, projectId, ttlMs = 25 * 60 * 1000) {
+  try {
+    const last = await sb.latestRun(projectId);
+    if (!last || last.ended_at) return false;
+    if (last.status === 'awaiting_review') return true;            // human-owned, no expiry
+    if (last.status === 'running') return (Date.now() - (last.started_at || 0)) < ttlMs;
+    return false;
+  } catch { return false; }   // never let a lock check block work
 }
 
 // project_context kinds that together form the project SPEC (the north star).
@@ -302,6 +371,10 @@ function buildModeGoal(mode, spec, project, config) {
   // agent doesn't spread itself across everything open.
   const focus = pickFocus(spec, project);
   if (focus) parts.push(`FOCUS THIS RUN ON THIS ONE ITEM (finish or repair it before starting anything else):\n${focus}`);
+  // Specialist assignment: the orchestrator classifies the focus item (falling
+  // back to the project goal) and has the agent act as the matching specialist.
+  const specialist = classifyWorker(`${focus} ${spec.specText || ''} ${(project && project.title) || ''}`);
+  if (specialist) parts.push(`${specialist.guidance}`);
   if (spec.criteria && spec.criteria.length) {
     parts.push('Success criteria:\n' + spec.criteria.map((c, i) => `  ${i + 1}. ${c}`).join('\n'));
   }
@@ -313,8 +386,41 @@ function buildModeGoal(mode, spec, project, config) {
   return parts.join('\n\n');
 }
 
-async function runForProject(services, project, goalOverride, budgetOverride, modeOverride) {
+// A project can declare it lives in a DIFFERENT repo via a context instruction
+// "target_repo: owner/name". Returns that value (lowercased) or null.
+async function projectTargetRepo(sb, projectId) {
+  try {
+    const rows = await sb.pullContext(projectId, 60);
+    const row = rows.find(r => r.kind === 'instruction' && String(r.content || '').trim().toLowerCase().startsWith('target_repo:'));
+    if (!row) return null;
+    return String(row.content).split(':').slice(1).join(':').trim().toLowerCase() || null;
+  } catch { return null; }
+}
+
+async function runForProject(services, project, goalOverride, budgetOverride, modeOverride, force) {
   const { sb, config } = services;
+
+  // Repo guard: if this project belongs to a DIFFERENT repo than the one checked
+  // out for this run, do NOT touch files — that's how the testingsite task once
+  // corrupted the runmywork repo. Skip the project; it only advances when a run is
+  // dispatched with its target_repo (which clones the right repo). Only enforced
+  // when AGENT_EXPECTED_REPO is known (set by agent.yml).
+  const expectedRepo = String(process.env.AGENT_EXPECTED_REPO || '').trim().toLowerCase();
+  if (expectedRepo) {
+    const declared = await projectTargetRepo(sb, project.id);
+    if (declared && declared !== expectedRepo) {
+      log(`▶ ${project.title} — belongs to repo "${declared}" but this run is on "${expectedRepo}"; skipping to avoid editing the wrong repo.`);
+      return { skipped: true, reason: 'wrong_repo' };
+    }
+  }
+
+  // Ownership lock: skip a project that's already being worked or is awaiting the
+  // human's review. A manual/forced run bypasses the lock (the user wants it now).
+  if (!force && await isProjectLocked(sb, project.id)) {
+    log(`▶ ${project.title} — another run is active or awaiting your review (locked); skipping.`);
+    return { skipped: true, reason: 'locked' };
+  }
+
   const { text: memoryText, spec } = await buildContext(sb, project.id);
 
   // Resolve the single action mode for this run. An explicit --goal bypasses the
@@ -364,20 +470,25 @@ async function runForProject(services, project, goalOverride, budgetOverride, mo
   // Inject real file tree so the model never guesses paths.
   // Cloud free tiers have tight token/day limits — use a shallow (1-level) tree to save tokens.
   let fileTree = '';
+  let surface = '';
   if (services.config.projectRoot) {
     const anyCloud = services.config.groqKey || services.config.openRouterKey || services.config.openAIKey;
     const depth = anyCloud ? 1 : 2;
     try { fileTree = buildFileTree(services.config.projectRoot, depth); } catch { /* best effort */ }
+    // What the user actually sees + where it lives — so user-facing edits land on
+    // the right element (e.g. "the title" → the real <title>, not a guess).
+    try { surface = buildVisibleSurface(services.config.projectRoot); } catch { /* best effort */ }
   }
 
   log(`▶ ${project.title}  [${project.status}]${mode ? `  mode: ${mode.label}` : ''}`);
   log(`   goal: ${goal.slice(0, 100)}`);
 
+  const extraContext = [contextText, fileTree, surface].filter(Boolean).join('\n\n').trim();
   const result = await runLoop({
     services, project, goal,
     mode,
     allowList: mode ? mode.allowList : undefined,
-    contextText: fileTree ? `${contextText}\n\n${fileTree}`.trim() : contextText,
+    contextText: extraContext,
     budget: budgetOverride || services.config.budget
   });
 
@@ -548,9 +659,11 @@ async function main() {
   // before flipping those tracker runs to complete (see deploy-verify.js).
   const handoff = { committed: false, runs: [], visualSummary: '', changedFiles: [], summary: '' };
 
+  // A manual/forced selection (explicit --project or --force) bypasses the lock.
+  const bypassLock = Boolean(args.project) || config.force;
   for (const project of targets) {
     try {
-      const result = await runForProject(services, project, args.project ? args.goal : undefined, args.budget, args.mode);
+      const result = await runForProject(services, project, args.project ? args.goal : undefined, args.budget, args.mode, bypassLock);
       if (result && result.committed) {
         handoff.committed = true;
         // Per-run objects so deploy-verify can file a criterion-review proposal

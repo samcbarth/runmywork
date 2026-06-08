@@ -182,6 +182,48 @@ const ORDER = [
   'implementation', 'validation', 'revision', 'deployment', 'reporting'
 ];
 
+// Worker specialties — the orchestrator (run.js) classifies the focus item and
+// has the agent act as the matching specialist for this run. This realises the
+// orchestrator→specialist-worker pattern inside the single-process mode system:
+// the mode still gates which tools exist; the specialty shapes WHAT to prioritise.
+const WORKER_SPECIALTIES = {
+  ui: {
+    id: 'ui', label: 'UI',
+    match: /\b(ui|ux|button|css|style|styles|layout|screen|page|view|render|component|color|colour|font|responsive|modal|form|design|frontend|front-end)\b/i,
+    guidance: 'Act as the UI specialist. Focus on the user-facing change — markup, styles, layout, what the user actually sees and clicks. Keep changes accessible and consistent with existing styles. After editing, set visual_summary to describe what the change looks like and where it appears.'
+  },
+  backend: {
+    id: 'backend', label: 'Backend',
+    match: /\b(api|endpoint|server|backend|back-end|database|schema|sql|query|migration|auth|token|webhook|integration|data model|state)\b/i,
+    guidance: 'Act as the Backend specialist. Focus on data and logic — endpoints, schema, queries, state, integrations. Preserve existing contracts and callers; do not break the API. Validate inputs and handle errors.'
+  },
+  testing: {
+    id: 'testing', label: 'Testing',
+    match: /\b(test|tests|testing|spec|coverage|verify|verification|assert|regression|qa|lint)\b/i,
+    guidance: 'Act as the Testing specialist. Focus on verification — run and/or add checks, confirm the behaviour against the success criteria, and report pass/fail precisely with evidence.'
+  },
+  documentation: {
+    id: 'documentation', label: 'Documentation',
+    match: /\b(doc|docs|documentation|readme|comment|comments|changelog|guide|instructions|wiki|annotate)\b/i,
+    guidance: 'Act as the Documentation specialist. Focus on clear, accurate docs/comments/changelog that match the actual code. Use today\'s real date for any dated entries. Do not change behaviour.'
+  },
+  research: {
+    id: 'research', label: 'Research',
+    match: /\b(research|investigate|explore|compare|evaluate|find out|figure out|spike|options|approach|feasibility)\b/i,
+    guidance: 'Act as the Research specialist. Investigate and gather context — read, search, fetch, and record findings with note/save_artifact. Recommend a concrete next step; do not change project assets.'
+  }
+};
+
+// Classify a focus item / goal text into a worker specialty. Returns null for
+// general work (no specialist persona needed).
+function classifyWorker(text) {
+  const s = String(text || '');
+  for (const id of ['testing', 'documentation', 'ui', 'backend', 'research']) {
+    if (WORKER_SPECIALTIES[id].match.test(s)) return WORKER_SPECIALTIES[id];
+  }
+  return null;
+}
+
 function getMode(id) {
   return MODES[id] || null;
 }
@@ -199,4 +241,4 @@ function defaultStartMode(spec) {
   return 'discovery';
 }
 
-module.exports = { MODES, ORDER, getMode, isWrite, defaultStartMode, READ_TOOLS, PLAN_TOOLS, WRITE_TOOLS };
+module.exports = { MODES, ORDER, getMode, isWrite, defaultStartMode, READ_TOOLS, PLAN_TOOLS, WRITE_TOOLS, WORKER_SPECIALTIES, classifyWorker };

@@ -181,6 +181,13 @@ ${showExec ? `- A REAL CODE REPOSITORY is connected. Prefer concrete execution o
   to actually make it. Do NOT substitute a markdown draft (save_artifact) or an add_tasks
   proposal for doing the work. Do the implementation YOURSELF — do not delegate it to a
   sub-agent. A criterion is only "advanced" when a real change is committed.
+- KNOW WHAT THE USER SEES. When a task concerns anything VISIBLE (the title, a heading, a
+  button, a label, on-screen text), find it in the USER-VISIBLE SURFACE MAP in your context
+  and edit THAT exact element. Never guess which file or tag holds it, and never add a new
+  element (e.g. a new footer/heading) when the one the task refers to already exists — change
+  the existing one. Read the file to confirm the element before editing.
+- Frame your work and your approval review in terms of what the user will SEE change on the
+  page (set visual_summary), not just which file you touched.
 ` : ''}${execBlock}
 Project state changes (tasks, status, priority) require human approval. Use the propose tool
 to file a proposal — never apply state changes directly.

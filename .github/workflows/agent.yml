@@ -130,6 +130,7 @@ jobs:
           OPENAI_API_KEY:            ${{ secrets.OPENAI_API_KEY }}
           GITHUB_TOKEN:              ${{ secrets.GITHUB_TOKEN }}
           AGENT_PROJECT_ROOT:        ${{ steps.target.outputs.root }}
+          AGENT_EXPECTED_REPO:       ${{ steps.target.outputs.repo }}   # repo actually checked out — the agent refuses to edit a project whose target_repo differs
           AGENT_ALLOW_FILE_WRITE:    '1'
           AGENT_ALLOW_GIT_WRITE:     '1'
           AGENT_ALLOW_GIT_PUSH:      '0'   # workflow handles the push below
