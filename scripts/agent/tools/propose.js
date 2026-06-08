@@ -42,10 +42,12 @@ function buildPayload(action, args) {
     case 'set_spec': {
       const goal = String(args.goal || '').trim();
       if (!goal) throw new Error('set_spec needs a non-empty "goal" string');
-      const list = (v) => (Array.isArray(v) ? v : [])
-        .map(s => String(s || '').trim()).filter(Boolean).slice(0, 8);
-      const successCriteria = list(args.successCriteria);
-      if (!successCriteria.length) throw new Error('set_spec needs at least one "successCriteria" item');
+      const list = (v, cap = 8) => (Array.isArray(v) ? v : [])
+        .map(s => String(s || '').trim()).filter(Boolean).slice(0, cap);
+      // Keep success criteria simple and verifiable: 3-5 max. Hard-cap at 5 so
+      // approvals stay easy to validate (see modes.js planning guidance).
+      const successCriteria = list(args.successCriteria, 5);
+      if (!successCriteria.length) throw new Error('set_spec needs at least one "successCriteria" item (aim for 3-5, max 5).');
       return {
         goal: goal.slice(0, 600),
         requirements:    list(args.requirements),
@@ -121,7 +123,7 @@ module.exports = {
       note: { type: 'string', description: 'Optional note for set_status.' },
       goal: { type: 'string', description: 'For set_spec: one-sentence project goal.' },
       requirements: { type: 'array', items: { type: 'string' }, description: 'For set_spec: key requirements.' },
-      successCriteria: { type: 'array', items: { type: 'string' }, description: 'For set_spec: 3-6 measurable, checkable success criteria.' },
+      successCriteria: { type: 'array', items: { type: 'string' }, description: 'For set_spec: 3-5 success criteria (MAX 5), each specific, observable, and verifiable — something a human can check off by looking at the result.' },
       constraints: { type: 'array', items: { type: 'string' }, description: 'For set_spec: constraints/boundaries.' },
       description: { type: 'string', description: 'For update_description: full project description (up to 2000 chars).' },
       summary: { type: 'string', description: 'For update_description: 1-2 sentence tagline shown on cards (up to 200 chars).' },
@@ -145,6 +147,25 @@ module.exports = {
     let payload;
     try { payload = buildPayload(action, args); }
     catch (e) { return { error: e.message }; }
+
+    // Duplicate suppression for add_tasks: drop any proposed task the user has
+    // marked as a duplicate (kind 'duplicate_task') or that already exists on the
+    // project. Stops the agent re-suggesting work that's already handled.
+    if (action === 'add_tasks') {
+      const norm = (s) => String(s || '').trim().toLowerCase();
+      let dupSet = new Set();
+      try {
+        const rows = await ctx.sb.pullContext(target.id, 80);
+        rows.filter(r => r.kind === 'duplicate_task')
+          .forEach(r => dupSet.add(norm(String(r.content || '').split('\n\nDuplicates:')[0])));
+      } catch { /* best effort */ }
+      const existing = new Set(((target.tasks) || []).map(t => norm(t.text)));
+      const filtered = payload.tasks.filter(t => { const k = norm(t); return !dupSet.has(k) && !existing.has(k); });
+      if (!filtered.length) {
+        return { ok: true, skipped: 'all proposed tasks are duplicates of handled/existing tasks — not filing' };
+      }
+      payload.tasks = filtered;
+    }
 
     const pending = await ctx.sb.pendingApprovals(target.id);
     if (alreadyPending(pending, action, payload)) {

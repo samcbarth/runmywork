@@ -225,6 +225,124 @@ Views.Approvals = (() => {
     App.refresh();
   }
 
+  /* ── Task review (per-task keep / mark-duplicate) ── */
+
+  // state per add_tasks card: { [approvalId]: { [taskIdx]: { dup, dupOf } } }
+  const _taskState = {};
+
+  function _renderTaskReview(a) {
+    const p = a.payload || {};
+    const tasks = Array.isArray(p.tasks) ? p.tasks : [];
+    if (!_taskState[a.id]) {
+      _taskState[a.id] = {};
+      tasks.forEach((_, i) => { _taskState[a.id][i] = { dup: false, dupOf: '' }; });
+    }
+    const st = _taskState[a.id];
+    const project = Store.getProject(a.project_id);
+    const openTasks = ((project && project.tasks) || []).filter(t => !t.done);
+    const optionsHtml = openTasks.map(ot =>
+      `<option value="${Models.escapeHtml(ot.text)}">${Models.escapeHtml(ot.text)}</option>`).join('');
+
+    const rows = tasks.map((t, i) => {
+      const s = st[i] || { dup: false };
+      return `
+        <div class="treview-row" data-task-idx="${i}">
+          <div class="treview-text">${Models.escapeHtml(t)}</div>
+          <div class="treview-toggle">
+            <button class="btn btn-sm treview-keep${!s.dup ? ' active' : ''}"
+              onclick="Views.Approvals._setTaskDup('${a.id}',${i},false)">＋ Keep</button>
+            <button class="btn btn-sm treview-dup${s.dup ? ' active' : ''}"
+              onclick="Views.Approvals._setTaskDup('${a.id}',${i},true)">⧉ Duplicate</button>
+          </div>
+          <select class="treview-dupof${s.dup ? '' : ' hidden'}" data-task-dupof="${i}">
+            <option value="">(optional) duplicates which existing task?</option>
+            ${optionsHtml}
+          </select>
+        </div>`;
+    }).join('');
+
+    return `
+      <div class="section-card treview-card" data-review-id="${a.id}" style="margin-top:10px;">
+        <div class="section-header">
+          <span class="section-title">Review ${tasks.length} proposed task${tasks.length === 1 ? '' : 's'}</span>
+        </div>
+        ${a.rationale ? `<p class="advisor-next">${Models.escapeHtml(a.rationale)}</p>` : ''}
+        <div class="treview-list">${rows}</div>
+        <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="btn btn-success" onclick="Views.Approvals.submitTaskReview('${a.id}')">Apply</button>
+          <button class="btn btn-danger" onclick="Views.Approvals.reject('${a.id}')">✕ Reject all</button>
+        </div>
+      </div>`;
+  }
+
+  function _setTaskDup(approvalId, idx, dup) {
+    _taskState[approvalId] = _taskState[approvalId] || {};
+    _taskState[approvalId][idx] = _taskState[approvalId][idx] || { dup: false, dupOf: '' };
+    _taskState[approvalId][idx].dup = dup;
+    const card = document.querySelector(`.treview-card[data-review-id="${approvalId}"]`);
+    if (!card) return;
+    const r = card.querySelector(`.treview-row[data-task-idx="${idx}"]`);
+    if (!r) return;
+    const keep = r.querySelector('.treview-keep');
+    const dupB = r.querySelector('.treview-dup');
+    const sel  = r.querySelector('.treview-dupof');
+    if (keep) keep.classList.toggle('active', !dup);
+    if (dupB) dupB.classList.toggle('active', dup);
+    if (sel)  sel.classList.toggle('hidden', !dup);
+  }
+
+  // Apply: keep non-duplicate tasks (added to the project), record the duplicates
+  // as `duplicate_task` context so the agent stops re-proposing them.
+  async function submitTaskReview(id) {
+    const a = Store.getApprovals().find(x => x.id === id);
+    if (!a) return;
+    const p = a.payload || {};
+    const tasks = Array.isArray(p.tasks) ? p.tasks : [];
+    const st = _taskState[id] || {};
+
+    // Pull the chosen "duplicates which existing task" values from the DOM.
+    const dupOfByIdx = {};
+    const card = document.querySelector(`.treview-card[data-review-id="${id}"]`);
+    if (card) card.querySelectorAll('.treview-dupof').forEach(sel => {
+      dupOfByIdx[sel.getAttribute('data-task-dupof')] = (sel.value || '').trim();
+    });
+
+    const project = Store.getProject(a.project_id);
+    const kept = [], dups = [];
+    tasks.forEach((t, i) => {
+      if (st[i] && st[i].dup) dups.push({ text: t, dupOf: dupOfByIdx[String(i)] || '' });
+      else kept.push(t);
+    });
+
+    if (project && kept.length) {
+      project.tasks = project.tasks || [];
+      kept.forEach(text => {
+        if (text && text.trim()) project.tasks.push({ id: crypto.randomUUID(), text: text.trim(), done: false, createdAt: Date.now() });
+      });
+      Store.saveProject(project);
+    }
+
+    // Record duplicates so the agent won't propose them again (see run.js buildContext).
+    for (const d of dups) {
+      await Sync.addContext({
+        project_id: a.project_id, kind: 'duplicate_task',
+        content: d.text + (d.dupOf ? `\n\nDuplicates: ${d.dupOf}` : ''),
+        created_by: 'user'
+      });
+    }
+
+    Sync.addWorklog({
+      project_id: a.project_id, kind: 'action', created_by: 'user',
+      summary: `Task review: kept ${kept.length}, marked ${dups.length} duplicate`,
+      detail: { kept, duplicates: dups }
+    });
+
+    await Sync.decideApproval(id, 'applied');
+    delete _taskState[id];
+    updateBadge();
+    App.refresh();
+  }
+
   async function render() {
     const root = document.getElementById('view-root');
     root.innerHTML = `
@@ -267,6 +385,8 @@ Views.Approvals = (() => {
         // The criteria review is its own interactive card (pass/fail per criterion
         // + one Submit), not a plain approve/reject proposal.
         if (a.action_type === 'review_criteria') return _renderCriteriaReview(a);
+        // add_tasks gets a per-task keep/duplicate review.
+        if (a.action_type === 'add_tasks') return _renderTaskReview(a);
         return `
         <div class="section-card" style="margin-top:10px;">
           <div class="section-header">
@@ -465,5 +585,6 @@ Views.Approvals = (() => {
   }
 
   return { render, approve, reject, updateBadge, autoApplyPending, notifyCriterionReview,
-           submitCriteriaReview, _setVerdict, _renderCriteriaReview };
+           submitCriteriaReview, _setVerdict, _renderCriteriaReview,
+           submitTaskReview, _setTaskDup, _renderTaskReview };
 })();

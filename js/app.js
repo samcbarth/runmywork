@@ -1,6 +1,6 @@
 const App = (() => {
   // Bumped on each deploy so you can confirm which build is live (shown in Settings).
-  const BUILD = '2026-06-08 · criteria review card on project page (bugfix)';
+  const BUILD = '2026-06-08 · Review tab + duplicate-task reject + 3-5 criteria';
 
   let _timerInterval = null;
   let _swRegistration = null;
@@ -27,6 +27,9 @@ const App = (() => {
       Views.Approvals.render();
     } else if (hash === 'settings') {
       Views.Settings.render();
+    } else if (hash.startsWith('review/')) {
+      const id = hash.slice('review/'.length);
+      Views.Review.render(id);
     } else if (hash.startsWith('project/')) {
       const id = hash.slice('project/'.length);
       Views.ProjectDetail.render(id);

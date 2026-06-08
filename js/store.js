@@ -540,6 +540,20 @@ const Sync = (() => {
     }
   }
 
+  // Run history for ONE project (newest first) — powers the Review tab's history.
+  async function pullRuns(projectId, limit = 10) {
+    if (!isConfigured()) return { ok: false, reason: 'not-configured', runs: [] };
+    try {
+      const res = await _fetchWithTimeout(
+        `${REST}/agent_runs?project_id=eq.${encodeURIComponent(projectId)}&order=started_at.desc&limit=${limit}&select=id,status,stage,mode,next_mode,percent,summary,started_at,updated_at,ended_at`,
+        { headers: HEADERS });
+      if (!res.ok) return { ok: false, reason: `http-${res.status}`, runs: [] };
+      return { ok: true, runs: await res.json() };
+    } catch (e) {
+      return { ok: false, reason: e.name === 'AbortError' ? 'timeout' : e.message, runs: [] };
+    }
+  }
+
   // Recent agent runs across ALL projects — feeds the global run watcher that
   // fires "agent started / finished" notifications no matter which page is open.
   // Filtered by updated_at so a run that just changed state surfaces immediately.
@@ -635,7 +649,7 @@ const Sync = (() => {
   return {
     pull, push, pushProject, remove,
     pullApprovals, decideApproval, addWorklog, pullWorklog,
-    pullContext, addContext, pullLatestRun, pullRecentRuns, pullErrorLog, updateRun,
+    pullContext, addContext, pullLatestRun, pullRuns, pullRecentRuns, pullErrorLog, updateRun,
     savePushSubscription,
     isConfigured, rowToProject, projectToRow,
     triggerAgent, triggerCooldownRemaining, triggerLastAt

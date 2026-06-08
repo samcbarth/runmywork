@@ -73,9 +73,11 @@ const MODES = {
     goalFragment:
       'PLANNING MODE (no code changes). Turn the objective into a concrete, reviewable ' +
       'plan. Break large work into SMALL tasks (use propose add_tasks, max 6 at a time) ' +
-      'and, if the project lacks a clear spec, propose one (propose set_spec with ' +
-      'measurable success criteria). Do NOT edit any file or write code. Finish by ' +
-      'calling done summarising the plan and set next_mode to "approval_request".',
+      'and, if the project lacks a clear spec, propose one (propose set_spec). Success ' +
+      'criteria MUST be 3-5 items (never more than 5), each specific, observable and ' +
+      'verifiable — something the human can check off by looking at the result, not a vague ' +
+      'goal. Do NOT edit any file or write code. Finish by calling done summarising the plan ' +
+      'and set next_mode to "approval_request".',
     promptFragment:
       'You are in PLANNING mode. You may research and file proposals (add_tasks, ' +
       'set_spec, update_description) but you CANNOT edit files or write code. Decompose ' +

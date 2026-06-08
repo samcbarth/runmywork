@@ -1,4 +1,4 @@
-const CACHE = 'runmywork-v32';
+const CACHE = 'runmywork-v33';
 const PRECACHE = [
   './',
   './index.html',
@@ -14,6 +14,7 @@ const PRECACHE = [
   './js/views/session-modal.js',
   './js/views/settings.js',
   './js/views/approvals.js',
+  './js/views/review.js',
   './icons/icon-192.png',
   './icons/icon-512.png'
 ];

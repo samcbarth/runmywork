@@ -51,6 +51,7 @@ Views.ProjectDetail = (() => {
             <span class="status-time">${Models.formatDays(timeIn)}</span>
           </div>
           <div class="detail-actions">
+            <button class="btn btn-sm btn-primary" onclick="App.navigate('review/${id}')">🔍 Review</button>
             <button class="btn btn-sm" onclick="Views.ProjectForm.open('${id}')">Edit</button>
             <div class="status-menu" id="status-menu">
               <button class="btn btn-sm" onclick="Views.ProjectDetail.toggleStatusMenu()">Change status ▾</button>
@@ -176,6 +177,7 @@ Views.ProjectDetail = (() => {
       // real one (same as the Approvals tab) instead of a generic Approve/Reject,
       // whose handler can't apply review_criteria.
       if (a.action_type === 'review_criteria') return Views.Approvals._renderCriteriaReview(a);
+      if (a.action_type === 'add_tasks') return Views.Approvals._renderTaskReview(a);
       return `
       <div class="advisor-task" style="flex-direction:column;align-items:stretch;gap:6px;">
         <span><strong>${Models.escapeHtml(_proposalSummary(a))}</strong></span>
@@ -930,6 +932,8 @@ Views.ProjectDetail = (() => {
   return {
     render, toggleStatusMenu, changeStatus, deleteSession, addLink, deleteLink,
     addTask, toggleTask, deleteTask, requestAdvice, decideProposal, loadWorklog,
-    loadRun, loadContext, saveContext, loadErrorLog, loadSpec
+    loadRun, loadContext, saveContext, loadErrorLog, loadSpec,
+    // Shared with the Review tab so it can render the same tracker + stage labels.
+    trackerHtml: _trackerHtml, STAGES: _STAGES, MODE_LABELS: _MODE_LABELS
   };
 })();

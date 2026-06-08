@@ -165,6 +165,7 @@ function partitionSpec(rows) {
       }
       continue;
     }
+    if (r.kind === 'duplicate_task') continue;   // surfaced separately (see buildContext)
     background.push(`[${r.kind}] ${r.content}`);
   }
   // requirements/criteria/constraints: reverse to roughly authored order; dedupe.
@@ -248,9 +249,19 @@ async function buildContext(sb, projectId) {
     background = text.length > 5000 ? '…' + text.slice(-5000) : text;
   }
 
+  // Tasks the user has marked as duplicates / already-handled — never propose these again.
+  const dupTasks = rows
+    .filter(r => r.kind === 'duplicate_task')
+    .map(r => String(r.content || '').split('\n\nDuplicates:')[0].trim())
+    .filter(Boolean);
+  const dupBlock = dupTasks.length
+    ? `ALREADY HANDLED — DO NOT PROPOSE THESE TASKS AGAIN (the user marked them duplicates):\n${[...new Set(dupTasks)].map(t => `  - ${t}`).join('\n')}`
+    : '';
+
   const blocks = [];
   if (spec.specText) blocks.push(`PROJECT SPEC (authoritative — all work must serve this):\n${spec.specText}`);
   if (spec.openWorkText) blocks.push(spec.openWorkText);
+  if (dupBlock)      blocks.push(dupBlock);
   if (progress)      blocks.push(`WHERE YOU LEFT OFF (continue from here — do not repeat finished work):\n${progress}`);
   if (background)    blocks.push(`BACKGROUND (user-provided context):\n${background}`);
   if (journal)       blocks.push(`RECENT JOURNAL:\n${journal}`);

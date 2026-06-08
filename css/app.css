@@ -1083,6 +1083,32 @@ svg { display: block; }
 .creview-report { margin-top: 10px; font-size: 0.8rem; color: var(--text-2); }
 .creview-report summary { cursor: pointer; }
 
+/* ── Task review (keep / duplicate) ──────────────────────────────── */
+.treview-list { margin-top: 8px; display: flex; flex-direction: column; gap: 8px; }
+.treview-row {
+  border: 1px solid var(--border); border-radius: 8px; padding: 10px;
+  background: var(--surface-2);
+}
+.treview-text { font-size: 0.88rem; color: var(--text); line-height: 1.4; }
+.treview-toggle { display: flex; gap: 6px; margin-top: 8px; }
+.treview-keep, .treview-dup { opacity: 0.55; }
+.treview-keep.active { background: var(--c-active); border-color: var(--c-active); color: #fff; opacity: 1; }
+.treview-dup.active  { background: var(--c-idle); border-color: var(--c-idle); color: #fff; opacity: 1; }
+.treview-dupof {
+  width: 100%; margin-top: 8px; border: 1px solid var(--border); border-radius: 6px;
+  padding: 6px 8px; font: inherit; font-size: 0.82rem; background: var(--surface); color: var(--text);
+}
+.treview-dupof.hidden { display: none; }
+
+/* ── Review tab ──────────────────────────────────────────────────── */
+.review-crit-list { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.review-crit { display: flex; gap: 8px; align-items: flex-start; font-size: 0.88rem; line-height: 1.4; }
+.review-crit-icon { flex: 0 0 auto; }
+.review-crit-text { display: flex; flex-direction: column; gap: 2px; }
+.review-crit-met .review-crit-text { color: var(--text-2); text-decoration: line-through; }
+.review-crit-failed .review-crit-text { color: var(--c-blocked); }
+.review-crit-fb { font-size: 0.78rem; color: var(--text-2); text-decoration: none; }
+
 /* ── Responsive ──────────────────────────────────────────────────── */
 @media (max-width: 480px) {
   .view-root { padding: 12px 12px 80px; }
