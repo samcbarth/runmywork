@@ -171,7 +171,12 @@ Views.ProjectDetail = (() => {
 
     // Pending proposals for THIS project — actionable changes the user gates.
     const proposals = Store.getApprovals().filter(a => a.project_id === project.id);
-    const proposalRows = proposals.map(a => `
+    const proposalRows = proposals.map(a => {
+      // The success-criteria review is an interactive pass/fail card — render the
+      // real one (same as the Approvals tab) instead of a generic Approve/Reject,
+      // whose handler can't apply review_criteria.
+      if (a.action_type === 'review_criteria') return Views.Approvals._renderCriteriaReview(a);
+      return `
       <div class="advisor-task" style="flex-direction:column;align-items:stretch;gap:6px;">
         <span><strong>${Models.escapeHtml(_proposalSummary(a))}</strong></span>
         ${_proposalDetail(a)}
@@ -179,7 +184,8 @@ Views.ProjectDetail = (() => {
           <button class="btn btn-sm btn-success" onclick="Views.ProjectDetail.decideProposal('${a.id}','approve')">✓ Approve</button>
           <button class="btn btn-sm btn-danger" onclick="Views.ProjectDetail.decideProposal('${a.id}','reject')">✕ Reject</button>
         </div>
-      </div>`).join('');
+      </div>`;
+    }).join('');
 
     let body;
     if (sug) {

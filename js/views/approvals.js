@@ -116,7 +116,7 @@ Views.Approvals = (() => {
       : '';
 
     return `
-      <div class="section-card creview-card" style="margin-top:10px;">
+      <div class="section-card creview-card" data-review-id="${a.id}" style="margin-top:10px;">
         <div class="section-header">
           <span class="section-title">${Models.escapeHtml(_summary(a))}</span>
         </div>
@@ -134,19 +134,16 @@ Views.Approvals = (() => {
   function _setVerdict(approvalId, idx, verdict) {
     _verdicts[approvalId] = _verdicts[approvalId] || {};
     _verdicts[approvalId][idx] = verdict;
-    // Scope to the right card: find the one whose markup carries this approval id.
-    const cards = document.querySelectorAll('.creview-card');
-    cards.forEach(card => {
-      if (!card.innerHTML.includes(`'${approvalId}'`)) return;
-      const r = card.querySelector(`.creview-row[data-crit-idx="${idx}"]`);
-      if (!r) return;
-      const pass = r.querySelector('.creview-pass');
-      const fail = r.querySelector('.creview-fail');
-      const fb   = r.querySelector('.creview-feedback');
-      if (pass) pass.classList.toggle('active', verdict === 'pass');
-      if (fail) fail.classList.toggle('active', verdict === 'fail');
-      if (fb)   fb.classList.toggle('hidden', verdict !== 'fail');
-    });
+    const card = document.querySelector(`.creview-card[data-review-id="${approvalId}"]`);
+    if (!card) return;
+    const r = card.querySelector(`.creview-row[data-crit-idx="${idx}"]`);
+    if (!r) return;
+    const pass = r.querySelector('.creview-pass');
+    const fail = r.querySelector('.creview-fail');
+    const fb   = r.querySelector('.creview-feedback');
+    if (pass) pass.classList.toggle('active', verdict === 'pass');
+    if (fail) fail.classList.toggle('active', verdict === 'fail');
+    if (fb)   fb.classList.toggle('hidden', verdict !== 'fail');
   }
 
   // Submit the review: tick passes, feed failures back, complete or flag the run,
@@ -160,11 +157,9 @@ Views.Approvals = (() => {
 
     // Collect per-criterion feedback from the textareas in this card.
     const fbByIdx = {};
-    document.querySelectorAll('.creview-card').forEach(card => {
-      if (!card.innerHTML.includes(`'${id}'`)) return;
-      card.querySelectorAll('.creview-feedback').forEach(t => {
-        fbByIdx[t.getAttribute('data-crit-fb')] = (t.value || '').trim();
-      });
+    const card = document.querySelector(`.creview-card[data-review-id="${id}"]`);
+    if (card) card.querySelectorAll('.creview-feedback').forEach(t => {
+      fbByIdx[t.getAttribute('data-crit-fb')] = (t.value || '').trim();
     });
 
     const failed = [];
@@ -470,5 +465,5 @@ Views.Approvals = (() => {
   }
 
   return { render, approve, reject, updateBadge, autoApplyPending, notifyCriterionReview,
-           submitCriteriaReview, _setVerdict };
+           submitCriteriaReview, _setVerdict, _renderCriteriaReview };
 })();

@@ -1,6 +1,6 @@
 const App = (() => {
   // Bumped on each deploy so you can confirm which build is live (shown in Settings).
-  const BUILD = '2026-06-08 · auto-cadence + criteria review + web push';
+  const BUILD = '2026-06-08 · criteria review card on project page (bugfix)';
 
   let _timerInterval = null;
   let _swRegistration = null;
