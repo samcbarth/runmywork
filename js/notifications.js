@@ -1,4 +1,42 @@
 const Notifications = (() => {
+  // VAPID public key (safe to embed; the private half lives only as a Supabase
+  // edge secret). Generated with Node crypto; matches VAPID_PUBLIC_KEY in send-push.
+  const VAPID_PUBLIC_KEY = 'BPYIBqHlPDK_3kefKQZviZBjXCK0yWnQWlSBxRrrGNsErRcWlMcKaxV9ZTC_pbsKcuvhViMhgxG_765PfTIpmpM';
+
+  function _urlB64ToUint8Array(base64) {
+    const padding = '='.repeat((4 - (base64.length % 4)) % 4);
+    const b64 = (base64 + padding).replace(/-/g, '+').replace(/_/g, '/');
+    const raw = atob(b64);
+    const out = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+    return out;
+  }
+
+  // Subscribe this installed PWA / browser to Web Push and store the subscription
+  // in Supabase so the agent (in the cloud) can push to it even when the app is
+  // closed. Idempotent — re-subscribing just re-saves the same endpoint.
+  async function subscribeToPush() {
+    try {
+      if (!('serviceWorker' in navigator) || !('PushManager' in window)) return false;
+      if (Notification.permission !== 'granted') return false;
+      const reg = await navigator.serviceWorker.ready;
+      let sub = await reg.pushManager.getSubscription();
+      if (!sub) {
+        sub = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: _urlB64ToUint8Array(VAPID_PUBLIC_KEY)
+        });
+      }
+      const json = sub.toJSON();
+      if (!json.keys) return false;
+      await Sync.savePushSubscription({ endpoint: sub.endpoint, p256dh: json.keys.p256dh, auth: json.keys.auth });
+      return true;
+    } catch (e) {
+      console.warn('Push subscribe failed:', e);
+      return false;
+    }
+  }
+
   async function checkOnOpen() {
     const settings = Store.getSettings();
     if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
@@ -77,6 +115,9 @@ const Notifications = (() => {
     const settings = Store.getSettings();
     settings.notificationsEnabled = perm === 'granted';
     Store.saveSettings(settings);
+    // Wire up closed-app delivery: subscribe to Web Push so the cloud agent can
+    // reach the phone even when the PWA isn't open.
+    if (perm === 'granted') subscribeToPush();
     return perm;
   }
 
@@ -90,5 +131,5 @@ const Notifications = (() => {
     } catch { /* not supported */ }
   }
 
-  return { checkOnOpen, requestPermission, tryRegisterPeriodicSync, notifyAgentRun };
+  return { checkOnOpen, requestPermission, tryRegisterPeriodicSync, notifyAgentRun, subscribeToPush };
 })();

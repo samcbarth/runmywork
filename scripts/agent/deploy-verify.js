@@ -25,6 +25,7 @@
 
 const { loadConfig } = require('./config');
 const { makeSupabase } = require('./supabase');
+const { sendPush } = require('./notify');
 
 const LIVE_URL       = (process.env.LIVE_URL || 'https://samcbarth.github.io/runmywork').replace(/\/+$/, '');
 const BUILD_ID       = String(process.env.DEPLOY_BUILD_ID || '').trim();
@@ -72,51 +73,78 @@ function buildReport({ verified, handoff }) {
   return lines.join('\n').slice(0, 1000);
 }
 
-// After a change is confirmed LIVE, file a gated review item for the human: a
-// mark_criterion_done proposal carrying the deploy report as evidence. Approving
-// it in the app ticks the matching success criterion. Best-effort + idempotent:
-// matches the agent's free-text criterion to a real success_criteria row so the
-// tick lands on the right one, and skips if it's already met or already pending.
-async function ensureCriterionApproval(sb, projectId, criteriaAdvanced, evidence) {
-  if (!projectId || !criteriaAdvanced) return;
-  let criterion = String(criteriaAdvanced).trim();
+const normCrit = (s) => String(s || '').split(/\n\n(?:Evidence|Feedback):/i)[0].trim().toLowerCase();
 
-  try {
-    const rows = await sb.pullContext(projectId, 60);
-    const crits = rows.filter(r => r.kind === 'success_criteria')
-      .map(r => String(r.content || '').trim()).filter(Boolean);
-    const needle = criterion.toLowerCase();
-    const match = crits.find(c =>
-      needle.includes(c.toLowerCase()) || c.toLowerCase().includes(needle.slice(0, 40)));
-    if (match) criterion = match;
+// After a change is confirmed LIVE, hand the work to the human for explicit
+// per-criterion sign-off. Files ONE `review_criteria` approval listing EVERY
+// success criterion with its current status (met / failed / open), which one
+// this run claims to have advanced, and the deploy evidence. The app renders
+// pass/fail toggles; submitting it ticks the passes and feeds failures back.
+//
+// Returns { hasCriteria, filed }. hasCriteria=false means the project has no
+// success criteria at all, so the caller completes the run outright (nothing to
+// review). Idempotent: skips filing if a review is already pending.
+async function ensureCriteriaReview(sb, projectId, criteriaAdvanced, deployReport, visualSummary, runId) {
+  if (!projectId) return { hasCriteria: false, filed: false };
 
-    // Already confirmed met? Don't re-ask.
-    const met = rows.filter(r => r.kind === 'success_criteria_met')
-      .map(r => String(r.content || '').split('\n\nEvidence:')[0].trim().toLowerCase());
-    if (met.includes(criterion.toLowerCase())) { log('   criterion already met — no review filed.'); return; }
-  } catch { /* fall back to the raw criterion text */ }
+  let rows = [];
+  try { rows = await sb.pullContext(projectId, 80); } catch { /* best effort */ }
+  const crits = rows.filter(r => r.kind === 'success_criteria')
+    .map(r => String(r.content || '').trim()).filter(Boolean);
+  // De-dupe preserving order.
+  const seen = new Set();
+  const criteria = crits.filter(c => { const k = normCrit(c); if (seen.has(k)) return false; seen.add(k); return true; });
+  if (!criteria.length) return { hasCriteria: false, filed: false };
 
+  // A criterion counts as met only if its newest sign-off is at least as recent
+  // as its newest failure feedback (so a re-failed criterion shows as not-met).
+  const metAt = new Map(), failAt = new Map();
+  for (const r of rows) {
+    const k = normCrit(r.content);
+    if (r.kind === 'success_criteria_met' && !metAt.has(k)) metAt.set(k, r.created_at || 0);
+    if (r.kind === 'success_criteria_feedback' && !failAt.has(k)) failAt.set(k, r.created_at || 0);
+  }
+  const isMet = (c) => { const k = normCrit(c); const m = metAt.has(k) ? metAt.get(k) : -1; const f = failAt.has(k) ? failAt.get(k) : -1; return m >= 0 && m >= f; };
+  // Match the agent's free-text "criteria_advanced" to a real criterion row.
+  const advNeedle = String(criteriaAdvanced || '').toLowerCase();
+  const advancedKey = advNeedle
+    ? (criteria.find(c => advNeedle.includes(normCrit(c)) || normCrit(c).includes(advNeedle.slice(0, 40))) || '')
+    : '';
+
+  // Already a review waiting? Don't duplicate — the existing one still stands.
   try {
     const pending = await sb.pendingApprovals(projectId);
-    if (pending.some(a => a.action_type === 'mark_criterion_done'
-        && (a.payload || {}).criterion === criterion)) {
-      log('   criterion review already pending — not duplicating.');
-      return;
+    if (pending.some(a => a.action_type === 'review_criteria')) {
+      log('   criteria review already pending — not duplicating.');
+      return { hasCriteria: true, filed: false };
     }
   } catch { /* best effort */ }
 
+  const payloadCriteria = criteria.map(c => ({
+    text: c.slice(0, 400),
+    met: isMet(c),
+    advancedThisRun: advancedKey ? normCrit(c) === normCrit(advancedKey) : false,
+    evidence: (advancedKey && normCrit(c) === normCrit(advancedKey)) ? String(deployReport || '').slice(0, 800) : ''
+  }));
+
   await sb.createApproval({
     project_id: projectId,
-    action_type: 'mark_criterion_done',
-    payload: { criterion: criterion.slice(0, 400), evidence: String(evidence || '').slice(0, 800) },
-    rationale: 'Live-verified change is deployed. Review the work and confirm this success criterion is met.'
+    action_type: 'review_criteria',
+    payload: {
+      criteria: payloadCriteria,
+      visualSummary: String(visualSummary || '').slice(0, 600),
+      deployReport: String(deployReport || '').slice(0, 1000),
+      runId: runId || null
+    },
+    rationale: 'Live-verified change is deployed. Review each success criterion and mark which passed and which failed. Failed ones go back to the agent with your feedback.'
   });
   await sb.addWorklog({
     project_id: projectId, kind: 'proposal', created_by: 'agent',
-    summary: `Criterion ready for review: "${criterion.slice(0, 60)}"`,
-    detail: { action_type: 'mark_criterion_done', payload: { criterion, evidence } }
+    summary: `Success criteria ready for your review (${criteria.length})`,
+    detail: { action_type: 'review_criteria', criteriaCount: criteria.length, advanced: advancedKey }
   });
-  log(`   ✓ filed criterion review: "${criterion.slice(0, 60)}"`);
+  log(`   ✓ filed criteria review (${criteria.length} criteria) for project ${projectId}`);
+  return { hasCriteria: true, filed: true };
 }
 
 async function main() {
@@ -163,15 +191,35 @@ async function main() {
     log('✓ Live verified — the change is live on the site.');
     for (const r of runs) {
       await sb.updateRun(r.runId, { stage: 'live_verified', percent: Math.round((6 / 7) * 100) });
-      await sb.updateRun(r.runId, {
-        stage: 'complete', status: 'done', percent: 100,
-        summary: report, ended_at: Date.now()
-      });
-      // Hand the finished work to the human: file a criterion-review proposal so
-      // they can look at the live change and tick the success criterion. Guarded
-      // so it never blocks completion.
-      try { await ensureCriterionApproval(sb, r.projectId, r.criteriaAdvanced, report); }
-      catch (e) { log(`   (criterion review not filed: ${e.message})`); }
+      // The change is LIVE but the run is NOT complete — the human must sign off
+      // on the success criteria first. File the review and hold the run at
+      // awaiting_review. Only a project with NO criteria completes outright.
+      let review = { hasCriteria: false, filed: false };
+      try { review = await ensureCriteriaReview(sb, r.projectId, r.criteriaAdvanced, report, handoff.visualSummary, r.runId); }
+      catch (e) { log(`   (criteria review not filed: ${e.message})`); }
+
+      let title = 'A project';
+      try { const pr = await sb.pullProject(r.projectId); if (pr) title = pr.title; } catch { /* best effort */ }
+
+      if (review.hasCriteria) {
+        await sb.updateRun(r.runId, {
+          stage: 'live_verified', status: 'awaiting_review',
+          percent: Math.round((6 / 7) * 100),
+          summary: report
+          // no ended_at — the run waits on the human's criteria review
+        });
+        log(`   ⏸ run ${r.runId} awaiting your criteria review.`);
+        await sendPush({ title: '📋 Review needed — confirm success criteria',
+          body: `${title}: the change is live. Mark which criteria passed.`,
+          projectId: r.projectId, tag: `rmw-run-${r.runId}` });
+      } else {
+        await sb.updateRun(r.runId, {
+          stage: 'complete', status: 'done', percent: 100,
+          summary: report, ended_at: Date.now()
+        });
+        await sendPush({ title: '✅ Change is live', body: `${title}: deployed and verified.`,
+          projectId: r.projectId, tag: `rmw-run-${r.runId}` });
+      }
     }
   } else {
     log('✗ Timed out waiting for the live site to reflect this build.');
@@ -180,6 +228,9 @@ async function main() {
         stage: 'deploying', status: 'failed',
         summary: report, ended_at: Date.now()
       });
+      await sendPush({ title: '⚠ Deploy not verified',
+        body: 'Change was pushed but the live site did not reflect it in time.',
+        projectId: r.projectId, tag: `rmw-run-${r.runId}` });
     }
   }
 

@@ -557,6 +557,38 @@ const Sync = (() => {
     }
   }
 
+  // Patch an agent_runs row from the app (RLS is anon-all). Used by the criteria
+  // review to flip a run awaiting_review → complete / needs_revision.
+  async function updateRun(id, patch) {
+    if (!isConfigured() || !id) return { ok: false };
+    try {
+      const res = await _fetchWithTimeout(`${REST}/agent_runs?id=eq.${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        headers: { ...HEADERS, Prefer: 'return=minimal' },
+        body: JSON.stringify({ updated_at: Date.now(), ...patch })
+      });
+      return { ok: res.ok, reason: res.ok ? undefined : `http-${res.status}` };
+    } catch (e) {
+      return { ok: false, reason: e.name === 'AbortError' ? 'timeout' : e.message };
+    }
+  }
+
+  // Store this device's Web Push subscription so the cloud agent can push to it.
+  // Upsert on endpoint so re-subscribing doesn't create duplicates.
+  async function savePushSubscription(sub) {
+    if (!isConfigured() || !sub || !sub.endpoint) return { ok: false };
+    try {
+      const res = await _fetchWithTimeout(`${REST}/push_subscriptions?on_conflict=endpoint`, {
+        method: 'POST',
+        headers: { ...HEADERS, Prefer: 'resolution=merge-duplicates,return=minimal' },
+        body: JSON.stringify([{ endpoint: sub.endpoint, p256dh: sub.p256dh, auth: sub.auth, created_at: Date.now() }])
+      });
+      return { ok: res.ok, reason: res.ok ? undefined : `http-${res.status}` };
+    } catch (e) {
+      return { ok: false, reason: e.name === 'AbortError' ? 'timeout' : e.message };
+    }
+  }
+
   // Fire-and-forget: call the edge function to dispatch a GitHub Actions run.
   // 20-minute client-side cooldown prevents hammering on every page refresh.
   const _TRIGGER_KEY = 'rmw_last_trigger';
@@ -603,7 +635,8 @@ const Sync = (() => {
   return {
     pull, push, pushProject, remove,
     pullApprovals, decideApproval, addWorklog, pullWorklog,
-    pullContext, addContext, pullLatestRun, pullRecentRuns, pullErrorLog,
+    pullContext, addContext, pullLatestRun, pullRecentRuns, pullErrorLog, updateRun,
+    savePushSubscription,
     isConfigured, rowToProject, projectToRow,
     triggerAgent, triggerCooldownRemaining, triggerLastAt
   };

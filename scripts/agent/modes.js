@@ -129,10 +129,12 @@ const MODES = {
     id: 'revision', label: 'Revision', klass: 'write',
     allowList: WRITE_TOOLS, nextMode: 'validation',
     goalFragment:
-      'REVISION MODE (writes code). Address ONLY the specific issues found during ' +
-      'validation. Apply targeted corrections (read_file → write_file → verify → git ' +
-      'commit), do not add new scope. Finish by calling done with what you fixed and set ' +
-      'next_mode to "validation" so the fix is re-checked.',
+      'REVISION MODE (writes code). Read the "OPEN CRITERIA NEEDING WORK" block in your ' +
+      'context — those are the success criteria the user marked FAILED in review, with ' +
+      'their feedback. Fix ONLY those criteria; do NOT touch criteria already marked met ' +
+      'and do not add new scope. Apply targeted corrections (read_file → write_file → ' +
+      'verify → git commit) that directly address the user feedback. Finish by calling ' +
+      'done with what you fixed and set next_mode to "validation" so the fix is re-checked.',
     promptFragment: null
   },
 

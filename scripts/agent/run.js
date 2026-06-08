@@ -83,24 +83,89 @@ function buildFileTree(root, maxDepth = 2) {
   return lines.join('\n');
 }
 
-function needsAgent(p, force) {
-  if (p.status === 'done' || p.status === 'archived') return false;
-  if (force) return true;
-  if (p.aiRequested) return true;          // user tapped "Ask the advisor"
-  if (!p.aiSuggestion) return true;        // never touched
+// Normalise a criterion string for set-membership comparison. Met rows carry an
+// "\n\nEvidence:" suffix and feedback rows an "\n\nFeedback:" suffix — strip both
+// so a criterion matches across success_criteria / _met / _feedback rows.
+function normCrit(s) { return String(s || '').split(/\n\n(?:Evidence|Feedback):/i)[0].trim().toLowerCase(); }
+
+// Does this project still have work the agent should advance on the autonomous
+// cadence? True when there are open tasks OR success criteria that aren't all
+// met yet. This is what lets the 3h cron actually progress a project instead of
+// picking nothing once it has a suggestion. When every criterion is met and no
+// open tasks remain, the project drops out — so the cadence stops cleanly and
+// never loops the mode chain forever.
+async function projectHasLiveWork(sb, p) {
+  const openTasks = (p.tasks || []).filter(t => !t.done).length;
+  if (openTasks > 0) return true;
+  try {
+    const rows = await sb.pullContext(p.id, 80);
+    const crit = new Set(rows.filter(r => r.kind === 'success_criteria').map(r => normCrit(r.content)));
+    if (crit.size) {
+      // Latest met / failed timestamp per criterion (rows are newest-first, so the
+      // first one seen is the latest). A criterion is RESOLVED only if its newest
+      // "met" sign-off is at least as recent as its newest failure feedback — so a
+      // later pass clears an earlier fail and we don't loop on it forever.
+      const metAt = new Map(), failAt = new Map();
+      for (const r of rows) {
+        const k = normCrit(r.content);
+        if (r.kind === 'success_criteria_met' && !metAt.has(k)) metAt.set(k, r.created_at || 0);
+        if (r.kind === 'success_criteria_feedback' && !failAt.has(k)) failAt.set(k, r.created_at || 0);
+      }
+      for (const c of crit) {
+        const m = metAt.has(c) ? metAt.get(c) : -1;
+        const f = failAt.has(c) ? failAt.get(c) : -1;
+        const resolved = m >= 0 && m >= f;   // met, and not re-failed since
+        if (!resolved) return true;
+      }
+    }
+  } catch { /* best effort — fall through to "no live work" */ }
   return false;
+}
+
+// Autonomous-cadence selection. Fast-path the explicit signals (force /
+// aiRequested / never-touched), then include any project that still has live
+// work. Pulls context only for the projects that need the deeper check.
+async function selectAutoTargets(sb, projects, force) {
+  const open = projects.filter(p => p.status !== 'done' && p.status !== 'archived');
+  const out = [];
+  for (const p of open) {
+    if (force || p.aiRequested || !p.aiSuggestion) { out.push(p); continue; }
+    if (await projectHasLiveWork(sb, p)) out.push(p);
+  }
+  return out;
 }
 
 // project_context kinds that together form the project SPEC (the north star).
 const SPEC_KINDS = new Set(['goal', 'requirement', 'success_criteria', 'constraint']);
+// Review-state kinds: human sign-off (met) and human failure feedback. These are
+// not part of the spec text but annotate each criterion's status.
+const REVIEW_KINDS = new Set(['success_criteria_met', 'success_criteria_feedback']);
 
 // Partition context rows (newest-first) into the structured spec + freeform background.
 function partitionSpec(rows) {
   const byKind = { goal: [], requirement: [], success_criteria: [], constraint: [] };
   const background = [];
+  // Latest met / failed timestamp (+ feedback text) per normalised criterion.
+  // Rows are newest-first, so the first one seen for a criterion is the latest.
+  const metAt = new Map();        // key → created_at
+  const failAt = new Map();       // key → { at, feedback }
   for (const r of rows) {
-    if (SPEC_KINDS.has(r.kind)) byKind[r.kind].push(String(r.content || '').trim());
-    else background.push(`[${r.kind}] ${r.content}`);
+    if (SPEC_KINDS.has(r.kind)) { byKind[r.kind].push(String(r.content || '').trim()); continue; }
+    if (r.kind === 'success_criteria_met') {
+      const key = normCrit(r.content);
+      if (!metAt.has(key)) metAt.set(key, r.created_at || 0);
+      continue;
+    }
+    if (r.kind === 'success_criteria_feedback') {
+      // content shape: "<criterion>\n\nFeedback: <text>"
+      const key = normCrit(r.content);
+      if (!failAt.has(key)) {
+        const fb = String(r.content || '').split(/\n\nFeedback:/i)[1];
+        failAt.set(key, { at: r.created_at || 0, feedback: (fb || '').trim() });
+      }
+      continue;
+    }
+    background.push(`[${r.kind}] ${r.content}`);
   }
   // requirements/criteria/constraints: reverse to roughly authored order; dedupe.
   const uniq = (arr) => [...new Set(arr.filter(Boolean))];
@@ -109,16 +174,44 @@ function partitionSpec(rows) {
   const constraints  = uniq(byKind.constraint.slice().reverse());
   const goal         = byKind.goal[0] || '';   // newest goal wins
 
+  // Per-criterion status by RECENCY: failed if the newest feedback is more recent
+  // than the newest met sign-off; met if a sign-off is at least as recent as any
+  // failure; otherwise not yet reviewed. This clears an old fail once it's re-passed.
+  const status = criteria.map(c => {
+    const key = normCrit(c);
+    const m = metAt.has(key) ? metAt.get(key) : -1;
+    const f = failAt.has(key) ? failAt.get(key) : null;
+    if (f && f.at > m)  return { text: c, state: 'failed', feedback: f.feedback };
+    if (m >= 0)         return { text: c, state: 'met' };
+    return { text: c, state: 'open' };
+  });
+  const openWork = status.filter(s => s.state !== 'met');
+
+  const mark = { met: '✓ met', failed: '✗ FAILED', open: '◦ not yet reviewed' };
   const specLines = [];
   if (goal)               specLines.push(`Goal: ${goal}`);
   if (requirements.length) specLines.push(`Requirements:\n${requirements.map(s => `  - ${s}`).join('\n')}`);
-  if (criteria.length)     specLines.push(`Success criteria:\n${criteria.map((s, i) => `  ${i + 1}. ${s}`).join('\n')}`);
+  if (status.length)       specLines.push(`Success criteria:\n${status.map((s, i) =>
+                              `  ${i + 1}. [${mark[s.state]}] ${s.text}`).join('\n')}`);
   if (constraints.length)  specLines.push(`Constraints:\n${constraints.map(s => `  - ${s}`).join('\n')}`);
+
+  // A focused block the revision/implementation modes act on: only the criteria
+  // that still need work, with the user's failure feedback attached.
+  let openWorkText = '';
+  if (openWork.length) {
+    openWorkText = 'OPEN CRITERIA NEEDING WORK (do these only — leave met criteria alone):\n' +
+      openWork.map((s, i) => {
+        const tag = s.state === 'failed' ? 'FAILED REVIEW' : 'not yet reviewed';
+        const fb = s.feedback ? `\n     user feedback: ${s.feedback}` : '';
+        return `  ${i + 1}. (${tag}) ${s.text}${fb}`;
+      }).join('\n');
+  }
 
   return {
     specText: specLines.join('\n'),
     hasGoal: Boolean(goal) || criteria.length > 0,
     criteria,
+    openWorkText,
     background
   };
 }
@@ -157,6 +250,7 @@ async function buildContext(sb, projectId) {
 
   const blocks = [];
   if (spec.specText) blocks.push(`PROJECT SPEC (authoritative — all work must serve this):\n${spec.specText}`);
+  if (spec.openWorkText) blocks.push(spec.openWorkText);
   if (progress)      blocks.push(`WHERE YOU LEFT OFF (continue from here — do not repeat finished work):\n${progress}`);
   if (background)    blocks.push(`BACKGROUND (user-provided context):\n${background}`);
   if (journal)       blocks.push(`RECENT JOURNAL:\n${journal}`);
@@ -221,6 +315,12 @@ async function runForProject(services, project, goalOverride, budgetOverride, mo
           try { await sb.updateRun(run.id, { next_mode: mode.id }); } catch { /* pre-migration */ }
         }
       } catch { /* tracker best-effort */ }
+      try {
+        const { sendPush } = require('./notify');
+        sendPush({ title: '⏸ Agent needs your approval',
+          body: `${project.title}: approve the ${mode.label} phase to let the agent start.`,
+          projectId: project.id, tag: `rmw-approval-${project.id}` });
+      } catch { /* best effort */ }
       return { skipped: true, reason: 'pending_approval', mode: mode.id };
     }
   }
@@ -402,7 +502,7 @@ async function main() {
   } else if (args.all) {
     targets = projects.filter(p => p.status !== 'done' && p.status !== 'archived');
   } else {
-    targets = projects.filter(p => needsAgent(p, config.force));
+    targets = await selectAutoTargets(sb, projects, config.force);
   }
 
   targets = targets.slice(0, args.project ? 1 : config.maxProjects);

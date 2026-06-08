@@ -317,15 +317,20 @@ Views.ProjectDetail = (() => {
   // Build the tracker markup from an agent_runs row.
   function _trackerHtml(run) {
     const curIdx = Math.max(0, _STAGES.findIndex(s => s[0] === run.stage));
-    const running = run.status === 'running';
-    const failed  = run.status === 'failed';
-    const allDone = run.status === 'done';
+    const running        = run.status === 'running';
+    const failed         = run.status === 'failed';
+    const allDone        = run.status === 'done';
+    const awaitingReview = run.status === 'awaiting_review';
+    const needsRevision  = run.status === 'needs_revision';
+    // Treat the live-but-awaiting-review run as "in flight" for the bar so the
+    // current stage pulses rather than showing a finished ✓.
+    const inFlight = running || awaitingReview;
 
     const segs = _STAGES.map((s, i) => {
       let cls = 'future';
       if (allDone) cls = 'done';
       else if (i < curIdx) cls = 'done';
-      else if (i === curIdx) cls = running ? 'current' : 'done';
+      else if (i === curIdx) cls = inFlight ? 'current' : 'done';
       return `<div class="tracker-seg ${cls}">
         <span class="tracker-dot">${cls === 'done' ? '✓' : i + 1}</span>
         <span class="tracker-seg-label">${s[1]}</span>
@@ -335,9 +340,13 @@ Views.ProjectDetail = (() => {
     const pct = Math.max(0, Math.min(100, run.percent || 0));
     const badge = failed
       ? '<span class="tracker-badge failed">Failed</span>'
-      : running
-        ? '<span class="tracker-badge working">● Working</span>'
-        : '<span class="tracker-badge done">✓ Done</span>';
+      : awaitingReview
+        ? '<span class="tracker-badge review">⏸ Awaiting review</span>'
+        : needsRevision
+          ? '<span class="tracker-badge revision">↻ Needs revision</span>'
+          : running
+            ? '<span class="tracker-badge working">● Working</span>'
+            : '<span class="tracker-badge done">✓ Done</span>';
 
     const logByStage = {};
     (run.log || []).forEach(l => { (logByStage[l.stage] = logByStage[l.stage] || []).push(l); });
@@ -380,6 +389,13 @@ Views.ProjectDetail = (() => {
       ? `<p class="tracker-summary" style="border-left:3px solid var(--c-active,#3b82f6);padding-left:8px;">⏸ Awaiting your approval to start the ${Models.escapeHtml(nextLabel || 'write')} phase. <a href="#/approvals">Open approvals →</a></p>`
       : '';
 
+    // Live change is deployed but the success criteria need YOUR sign-off.
+    const reviewNote = awaitingReview
+      ? `<p class="tracker-summary" style="border-left:3px solid var(--c-idle,#f59e0b);padding-left:8px;">⏸ The change is live. Review the success criteria and mark which passed. <a href="#/approvals">Open review →</a></p>`
+      : needsRevision
+        ? `<p class="tracker-summary" style="border-left:3px solid var(--c-blocked,#ef4444);padding-left:8px;">↻ You marked criteria failed — the agent is reworking only those. A new run will appear shortly.</p>`
+        : '';
+
     return `
       <div class="section-header" style="margin-bottom:10px;">
         <span class="section-title">🤖 Agent progress</span>${badge}
@@ -388,6 +404,7 @@ Views.ProjectDetail = (() => {
       <div class="tracker-fill-wrap"><div class="tracker-fill" style="width:${pct}%"></div></div>
       <div class="tracker-meta">Stage ${curIdx + 1} of ${_STAGES.length} · ${_STAGES[curIdx][1]} · ${pct}% · ${when}</div>
       ${modeLine}
+      ${reviewNote}
       ${approvalNote || (run.summary ? `<p class="tracker-summary">${Models.escapeHtml(run.summary)}</p>` : '')}
       ${liveBtn}
       <div class="tracker-stages">${stageRows}</div>`;

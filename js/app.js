@@ -1,6 +1,6 @@
 const App = (() => {
   // Bumped on each deploy so you can confirm which build is live (shown in Settings).
-  const BUILD = '2026-06-07 · instant render + testingsite routing';
+  const BUILD = '2026-06-08 · auto-cadence + criteria review + web push';
 
   let _timerInterval = null;
   let _swRegistration = null;
@@ -324,8 +324,16 @@ const App = (() => {
         if (!prev && r.status === 'running') {
           Notifications.notifyAgentRun({ title: '🤖 Agent started',
             body: `Working on ${title}…`, projectId: r.project_id, tag: `rmw-run-${r.id}` });
+        } else if (r.status === 'awaiting_review' && prev !== 'awaiting_review') {
+          Notifications.notifyAgentRun({ title: '📋 Review needed — confirm success criteria',
+            body: `${title}: the change is live. Mark which criteria passed.`,
+            projectId: r.project_id, tag: `rmw-run-${r.id}` });
+        } else if (r.status === 'needs_revision' && prev !== 'needs_revision') {
+          Notifications.notifyAgentRun({ title: '↻ Revision started',
+            body: `${title} — agent reworking the criteria you failed.`,
+            projectId: r.project_id, tag: `rmw-run-${r.id}` });
         } else if (r.status === 'done' && prev !== 'done') {
-          Notifications.notifyAgentRun({ title: '✅ Agent finished — review & approve',
+          Notifications.notifyAgentRun({ title: '✅ Agent finished',
             body: `${title}: ${(r.summary || 'Work complete').split('\n')[0].slice(0, 80)}`,
             projectId: r.project_id, tag: `rmw-run-${r.id}` });
         } else if (r.status === 'failed' && prev !== 'failed') {
@@ -333,7 +341,10 @@ const App = (() => {
             body: `${title} — open to see the error log.`, projectId: r.project_id, tag: `rmw-run-${r.id}` });
         }
       }
-      if (r.status === 'done' && prev !== 'done') completed = true;
+      // A run reaching awaiting_review files a review_criteria proposal; a done run
+      // may file proposals too — refresh the inbox on either transition.
+      if ((r.status === 'done' && prev !== 'done') ||
+          (r.status === 'awaiting_review' && prev !== 'awaiting_review')) completed = true;
       states[r.id] = r.status;
     }
     _saveRunStates(states);
