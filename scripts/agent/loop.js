@@ -152,8 +152,18 @@ You operate in THIS mode ONLY for this run. Do not attempt work that belongs to 
 later mode. When you finish, call done and set next_mode to recommend what runs next.
 ` : '';
 
+  // Real current date from the runner clock — the model's training cutoff makes it
+  // hallucinate dates (e.g. writing a 2023 "last updated"), so give it the truth.
+  const today = new Date();
+  const todayIso = today.toISOString().slice(0, 10);
+  const todayLong = today.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' });
+
   return `You are an autonomous work agent inside RunMyWork, a personal project hub.
 You are given ONE project and a goal. Make real progress using the available tools, then stop.
+
+TODAY'S DATE IS ${todayIso} (${todayLong}, UTC). Whenever a task needs the current date —
+a "last updated" line, a changelog entry, a timestamp — use THIS date. Never guess the date
+from memory and never use a date from your training data.
 ${modeBlock}
 Rules:
 - You are a WORKER, not an advisor. Do the work — never write prose about what
@@ -373,6 +383,9 @@ async function runLoop(opts) {
         const didWrite = (ctx.changedFiles || []).length > 0;
         if (goalAsksForWrite && !didWrite && steps < budget - 1) {
           ctx.done = false;
+          // Answer the done tool_call FIRST — OpenAI rejects the next request if any
+          // tool_call_id is left without a matching tool message.
+          messages.push({ role: 'tool', content: result, tool_name: name });
           messages.push({ role: 'user', content: 'You called done but the goal required a file edit and no files were changed. Use write_file to make the change now, then call done again.' });
           continue;
         }
@@ -396,6 +409,8 @@ async function runLoop(opts) {
                 errorMessage: `Verify gate rejected done — syntax errors:\n${broken.join('\n')}`
               });
             }
+            // Answer the done tool_call FIRST (see Gate 1) before the nudge.
+            messages.push({ role: 'tool', content: result, tool_name: name });
             messages.push({ role: 'user', content: `You called done but the file(s) you changed have syntax errors:\n${broken.join('\n')}\nFix them with write_file, run verify to confirm, then call done again.` });
             continue;
           }
