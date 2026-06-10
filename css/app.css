@@ -1070,6 +1070,12 @@ svg { display: block; }
 }
 .creview-badge.met { background: var(--c-active); }
 .creview-badge.adv { background: var(--accent); }
+.creview-badge.stuck { background: var(--c-blocked); }
+.creview-live {
+  margin-top: 8px; padding: 8px 10px; border: 1px solid var(--c-idle);
+  border-radius: 8px; background: var(--bg-idle, var(--surface-2)); font-size: 0.82rem;
+}
+.creview-live pre { margin: 4px 0 0; white-space: pre-wrap; font-size: 0.78rem; color: var(--text); }
 .creview-toggle { display: flex; gap: 6px; margin-top: 8px; }
 .creview-pass, .creview-fail { opacity: 0.55; }
 .creview-pass.active { background: var(--c-active); border-color: var(--c-active); color: #fff; opacity: 1; }

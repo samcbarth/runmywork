@@ -86,6 +86,26 @@ function buildReport({ outcome, handoff }) {
 
 const normCrit = (s) => String(s || '').split(/\n\n(?:Evidence|Feedback):/i)[0].trim().toLowerCase();
 
+// Snapshot what the live page ACTUALLY shows right now (title + headings + short
+// status-ish text), so the human reviews the agent's claim against reality, not
+// against the agent's own description of its work.
+async function fetchLiveSnapshot() {
+  try {
+    const res = await fetch(`${LIVE_URL}/?cb=${Date.now()}`, { cache: 'no-store', headers: { 'Cache-Control': 'no-cache' } });
+    if (!res.ok) return '';
+    const html = await res.text();
+    const clean = (s) => String(s || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 90);
+    const out = [];
+    const title = (html.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1];
+    if (title) out.push(`title: "${clean(title)}"`);
+    for (const m of html.matchAll(/<h([1-3])[^>]*>([\s\S]*?)<\/h\1>/gi)) {
+      const t = clean(m[2]);
+      if (t) out.push(`h${m[1]}: "${t}"`);
+    }
+    return out.slice(0, 8).join('\n');
+  } catch { return ''; }
+}
+
 // After a change is confirmed LIVE, hand the work to the human for explicit
 // per-criterion sign-off. Files ONE `review_criteria` approval listing EVERY
 // success criterion with its current status (met / failed / open), which one
@@ -109,11 +129,16 @@ async function ensureCriteriaReview(sb, projectId, criteriaAdvanced, deployRepor
 
   // A criterion counts as met only if its newest sign-off is at least as recent
   // as its newest failure feedback (so a re-failed criterion shows as not-met).
-  const metAt = new Map(), failAt = new Map();
+  // Also count rejections per criterion (every feedback row is one) so the review
+  // card can warn the human about repeat claims.
+  const metAt = new Map(), failAt = new Map(), rejCount = new Map();
   for (const r of rows) {
     const k = normCrit(r.content);
     if (r.kind === 'success_criteria_met' && !metAt.has(k)) metAt.set(k, r.created_at || 0);
-    if (r.kind === 'success_criteria_feedback' && !failAt.has(k)) failAt.set(k, r.created_at || 0);
+    if (r.kind === 'success_criteria_feedback') {
+      rejCount.set(k, (rejCount.get(k) || 0) + 1);
+      if (!failAt.has(k)) failAt.set(k, r.created_at || 0);
+    }
   }
   const isMet = (c) => { const k = normCrit(c); const m = metAt.has(k) ? metAt.get(k) : -1; const f = failAt.has(k) ? failAt.get(k) : -1; return m >= 0 && m >= f; };
   // Match the agent's free-text "criteria_advanced" to a real criterion row.
@@ -135,8 +160,13 @@ async function ensureCriteriaReview(sb, projectId, criteriaAdvanced, deployRepor
     text: c.slice(0, 400),
     met: isMet(c),
     advancedThisRun: advancedKey ? normCrit(c) === normCrit(advancedKey) : false,
-    evidence: (advancedKey && normCrit(c) === normCrit(advancedKey)) ? String(deployReport || '').slice(0, 800) : ''
+    evidence: (advancedKey && normCrit(c) === normCrit(advancedKey)) ? String(deployReport || '').slice(0, 800) : '',
+    rejections: rejCount.get(normCrit(c)) || 0
   }));
+
+  // What the live page actually shows right now — reality next to the claim.
+  let liveSnapshot = '';
+  try { liveSnapshot = await fetchLiveSnapshot(); } catch { /* best effort */ }
 
   await sb.createApproval({
     project_id: projectId,
@@ -145,6 +175,8 @@ async function ensureCriteriaReview(sb, projectId, criteriaAdvanced, deployRepor
       criteria: payloadCriteria,
       visualSummary: String(visualSummary || '').slice(0, 600),
       deployReport: String(deployReport || '').slice(0, 1000),
+      liveSnapshot: liveSnapshot.slice(0, 800),
+      liveUrl: LIVE_URL,
       runId: runId || null
     },
     rationale: 'Live-verified change is deployed. Review each success criterion and mark which passed and which failed. Failed ones go back to the agent with your feedback.'

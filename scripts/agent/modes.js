@@ -115,18 +115,24 @@ const MODES = {
 
   validation: {
     id: 'validation', label: 'Validation', klass: 'read',
-    allowList: ['read_file', 'find_in_file', 'files', 'verify', 'shell', 'note', 'stage', 'done'],
+    allowList: ['read_file', 'find_in_file', 'files', 'verify', 'fetch_url', 'shell', 'note', 'stage', 'done'],
     nextMode: 'deployment',
     goalFragment:
       'VALIDATION MODE (read-only). Test and verify the work just implemented. Run ' +
       'verify on changed files, review outputs, and confirm the success criteria were ' +
-      'actually met. Make NO changes. If everything passes, set next_mode to ' +
-      '"deployment". If you find failures, document them with note and set next_mode to ' +
-      '"revision". Finish by calling done with the validation result.',
+      'actually met. CRITICAL: for any criterion about something VISIBLE on the site ' +
+      '(title, heading, text, list items), use fetch_url on the LIVE site URL (it is in ' +
+      'the project goal/spec) and confirm the live page actually shows the change — do ' +
+      'not trust the local file or a previous run\'s claim. Make NO changes. If ' +
+      'everything passes, set next_mode to "deployment". If the live site does not show ' +
+      'the change or you find failures, document exactly what the live page shows with ' +
+      'note and set next_mode to "revision". Finish by calling done with the result.',
     promptFragment:
-      'You are in VALIDATION mode. Test and verify only — you have no write tools. ' +
-      'Confirm the work meets its criteria, document any failures, then call done with ' +
-      'next_mode set to "deployment" (pass) or "revision" (fail).'
+      'You are in VALIDATION mode. Test and verify only — you have no write tools. For ' +
+      'visible criteria, fetch the LIVE site URL and check the actual served content; a ' +
+      'criterion is only met if the live page proves it. Document failures (quote what ' +
+      'the live page really shows), then call done with next_mode "deployment" (pass) ' +
+      'or "revision" (fail).'
   },
 
   revision: {

@@ -94,9 +94,13 @@ Views.Approvals = (() => {
       const badge = c.met
         ? `<span class="creview-badge met">previously met</span>`
         : (c.advancedThisRun ? `<span class="creview-badge adv">worked this run</span>` : '');
+      // Repeat-claim warning: this criterion has been claimed-and-rejected before —
+      // scrutinise it against the live snapshot instead of trusting the claim.
+      const stuck = (c.rejections || 0) >= 2
+        ? `<span class="creview-badge stuck">⚠ rejected ${c.rejections}× before</span>` : '';
       return `
         <div class="creview-row" data-crit-idx="${i}">
-          <div class="creview-text">${Models.escapeHtml(c.text || '')} ${badge}</div>
+          <div class="creview-text">${Models.escapeHtml(c.text || '')} ${badge}${stuck}</div>
           <div class="creview-toggle">
             <button class="btn btn-sm creview-pass${verdict === 'pass' ? ' active' : ''}"
               onclick="Views.Approvals._setVerdict('${a.id}',${i},'pass')">✓ Pass</button>
@@ -114,6 +118,11 @@ Views.Approvals = (() => {
     const visual = p.visualSummary
       ? `<p class="approval-detail-note"><strong>What changed:</strong> ${Models.escapeHtml(p.visualSummary)}</p>`
       : '';
+    // Reality check: what the live page actually shows right now, captured at review
+    // time — judge the claims against THIS, not the agent's description.
+    const live = p.liveSnapshot
+      ? `<div class="creview-live"><strong>Live site right now${p.liveUrl ? ` (<a href="${Models.escapeHtml(p.liveUrl)}" target="_blank" rel="noopener">open ↗</a>)` : ''}:</strong><pre>${Models.escapeHtml(p.liveSnapshot)}</pre></div>`
+      : '';
 
     return `
       <div class="section-card creview-card" data-review-id="${a.id}" style="margin-top:10px;">
@@ -122,6 +131,7 @@ Views.Approvals = (() => {
         </div>
         ${a.rationale ? `<p class="advisor-next">${Models.escapeHtml(a.rationale)}</p>` : ''}
         ${visual}
+        ${live}
         <div class="creview-list">${rows}</div>
         ${report}
         <div style="margin-top:12px;">

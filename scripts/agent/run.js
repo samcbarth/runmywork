@@ -218,6 +218,8 @@ function partitionSpec(rows) {
   // Rows are newest-first, so the first one seen for a criterion is the latest.
   const metAt = new Map();        // key → created_at
   const failAt = new Map();       // key → { at, feedback }
+  const rejCount = new Map();     // key → how many times a completion claim was rejected
+  const bumpRej = (key) => rejCount.set(key, (rejCount.get(key) || 0) + 1);
   for (const r of rows) {
     if (SPEC_KINDS.has(r.kind)) { byKind[r.kind].push(String(r.content || '').trim()); continue; }
     if (r.kind === 'success_criteria_met') {
@@ -226,12 +228,21 @@ function partitionSpec(rows) {
       continue;
     }
     if (r.kind === 'success_criteria_feedback') {
-      // content shape: "<criterion>\n\nFeedback: <text>"
+      // content shape: "<criterion>\n\nFeedback: <text>". EVERY feedback row is a
+      // rejection event — count them all; keep only the newest for display.
       const key = normCrit(r.content);
+      bumpRej(key);
       if (!failAt.has(key)) {
         const fb = String(r.content || '').split(/\n\nFeedback:/i)[1];
         failAt.set(key, { at: r.created_at || 0, feedback: (fb || '').trim() });
       }
+      continue;
+    }
+    // Inline-rejected mark_criterion_done leaves a note: [REJECTED] ... "<criterion>" ...
+    if (r.kind === 'note' && /^\[REJECTED\]/.test(String(r.content || ''))) {
+      const q = String(r.content).match(/"([^"]{4,200})"/);
+      if (q) bumpRej(normCrit(q[1]));
+      background.push(`[${r.kind}] ${r.content}`);
       continue;
     }
     if (r.kind === 'duplicate_task') continue;   // surfaced separately (see buildContext)
@@ -251,9 +262,10 @@ function partitionSpec(rows) {
     const key = normCrit(c);
     const m = metAt.has(key) ? metAt.get(key) : -1;
     const f = failAt.has(key) ? failAt.get(key) : null;
-    if (f && f.at > m)  return { text: c, state: 'failed', feedback: f.feedback };
-    if (m >= 0)         return { text: c, state: 'met' };
-    return { text: c, state: 'open' };
+    const rejections = rejCount.get(key) || 0;
+    if (f && f.at > m)  return { text: c, state: 'failed', feedback: f.feedback, rejections };
+    if (m >= 0)         return { text: c, state: 'met', rejections };
+    return { text: c, state: 'open', rejections };
   });
   const openWork = status.filter(s => s.state !== 'met');
 
@@ -273,7 +285,12 @@ function partitionSpec(rows) {
       openWork.map((s, i) => {
         const tag = s.state === 'failed' ? 'FAILED REVIEW' : 'not yet reviewed';
         const fb = s.feedback ? `\n     user feedback: ${s.feedback}` : '';
-        return `  ${i + 1}. (${tag}) ${s.text}${fb}`;
+        // Escalating stuck warning: repeated rejections mean the approach itself is
+        // wrong (wrong file, wrong repo, wrong element) — not that it needs another try.
+        let warn = '';
+        if (s.rejections >= 3) warn = `\n     ⚠ STUCK: this claim was REJECTED ${s.rejections} times. Your approach is failing for a reason you have not found. DO NOT retry the same edit. Investigate first: confirm the exact file and element (see the USER-VISIBLE SURFACE MAP), confirm you are in the right repository, and fetch the live site to see its actual current state.`;
+        else if (s.rejections >= 2) warn = `\n     ⚠ rejected ${s.rejections}× before — the previous approach did not work; verify the real cause before editing again.`;
+        return `  ${i + 1}. (${tag}) ${s.text}${fb}${warn}`;
       }).join('\n');
   }
 
@@ -359,8 +376,20 @@ async function pickMode(sb, project, spec, override) {
   if (override && getMode(override)) return override;
   let last = null;
   try { last = await sb.latestRun(project.id); } catch { /* best effort */ }
-  if (last && last.next_mode && getMode(last.next_mode)) return last.next_mode;
-  return defaultStartMode(spec);
+  let modeId = (last && last.next_mode && getMode(last.next_mode)) ? last.next_mode : defaultStartMode(spec);
+
+  // Stuck-loop breaker: if the item this run would focus on has had its completion
+  // claim rejected 3+ times, a write mode would just retry the same failing edit.
+  // Force a read-only ANALYSIS run instead — figure out WHY it keeps failing
+  // (wrong file? wrong repo? wrong element? not deploying?) before touching code.
+  if (isWrite(modeId)) {
+    const focus = (spec.status || []).find(s => s.state === 'failed') || (spec.status || []).find(s => s.state === 'open');
+    if (focus && (focus.rejections || 0) >= 3) {
+      log(`   ⚠ stuck-loop breaker: "${focus.text.slice(0, 60)}" rejected ${focus.rejections}× — forcing analysis instead of ${modeId}.`);
+      return 'analysis';
+    }
+  }
+  return modeId;
 }
 
 // Build the goal for a moded run: the mode's directive leads, then the spec /

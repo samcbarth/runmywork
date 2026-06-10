@@ -1,6 +1,6 @@
 const App = (() => {
   // Bumped on each deploy so you can confirm which build is live (shown in Settings).
-  const BUILD = '2026-06-08 · Review tab + duplicate-task reject + 3-5 criteria';
+  const BUILD = '2026-06-08 · stuck-loop breaker + live reality check';
 
   let _timerInterval = null;
   let _swRegistration = null;

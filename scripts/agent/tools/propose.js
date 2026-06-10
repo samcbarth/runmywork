@@ -172,6 +172,22 @@ module.exports = {
       return { ok: true, skipped: 'an equivalent proposal is already pending' };
     }
 
+    // Rejected-claim guard: never re-file a completion claim the human already
+    // rejected for the same criterion with essentially the same evidence. A repeat
+    // claim without NEW evidence is the signature of a stuck loop.
+    if (action === 'mark_criterion_done') {
+      const normTxt = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ').slice(0, 150);
+      let rejected = [];
+      try { rejected = await ctx.sb.rejectedApprovals(target.id, 'mark_criterion_done'); } catch { /* best effort */ }
+      const sameCriterion = rejected.filter(r => normTxt((r.payload || {}).criterion) === normTxt(payload.criterion));
+      if (sameCriterion.some(r => normTxt((r.payload || {}).evidence) === normTxt(payload.evidence))) {
+        return { error: `BLOCKED: this exact completion claim ("${payload.criterion.slice(0, 60)}") was already REJECTED by the human with the same evidence. Do not re-file it. Something about your approach is wrong — verify the file, the element, the repository, and the LIVE site state, make a genuinely different change, and only then claim it with new evidence.` };
+      }
+      if (sameCriterion.length >= 3) {
+        return { error: `BLOCKED: completion claims for "${payload.criterion.slice(0, 60)}" have been rejected ${sameCriterion.length} times. Stop claiming and investigate: fetch the live site, confirm the element actually changed, and report what you find with the note tool instead.` };
+      }
+    }
+
     const rationale = (args.rationale || '').slice(0, 400);
     await ctx.sb.createApproval({
       project_id: target.id,

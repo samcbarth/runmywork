@@ -110,6 +110,15 @@ function makeSupabase(config) {
     return res.json();
   }
 
+  // Recently REJECTED proposals of one type — used to stop the agent re-filing a
+  // claim the human already turned down with the same evidence.
+  async function rejectedApprovals(projectId, actionType, limit = 20) {
+    const res = await rest(
+      `/approvals?project_id=eq.${encodeURIComponent(projectId)}&status=eq.rejected&action_type=eq.${encodeURIComponent(actionType)}&order=created_at.desc&limit=${limit}&select=payload,created_at`);
+    if (!res.ok) return [];
+    return res.json();
+  }
+
   async function createApproval(row) {
     const res = await rest(`/approvals`, {
       method: 'POST',
@@ -231,7 +240,7 @@ function makeSupabase(config) {
   return {
     pullProjects, pullProject, setSuggestion,
     addWorklog, pullWorklog,
-    pendingApprovals, createApproval,
+    pendingApprovals, rejectedApprovals, createApproval,
     pullContext, createRun, updateRun, latestRun, modeAuthorization,
     logError, pullErrorLog,
     rowToProject, ping
