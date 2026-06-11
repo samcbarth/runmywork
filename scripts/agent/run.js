@@ -415,9 +415,14 @@ function buildModeGoal(mode, spec, project, config) {
   return parts.join('\n\n');
 }
 
-// A project can declare it lives in a DIFFERENT repo via a context instruction
-// "target_repo: owner/name". Returns that value (lowercased) or null.
+// A project can declare it lives in a DIFFERENT repo. New shape is the
+// projects.target_repo column (preferred); legacy shape is a context instruction
+// row "target_repo: owner/name". Returns the lowercased value or null.
 async function projectTargetRepo(sb, projectId) {
+  try {
+    const proj = await sb.pullProject(projectId);
+    if (proj && proj.targetRepo) return String(proj.targetRepo).trim().toLowerCase();
+  } catch { /* fall through to legacy lookup */ }
   try {
     const rows = await sb.pullContext(projectId, 60);
     const row = rows.find(r => r.kind === 'instruction' && String(r.content || '').trim().toLowerCase().startsWith('target_repo:'));

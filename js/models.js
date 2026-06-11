@@ -19,7 +19,16 @@ const Models = (() => {
       tasks: [],
       summary: data.summary || '',
       aiSuggestion: null,
-      aiRequested: false
+      aiRequested: false,
+      targetRepo: data.targetRepo || '',
+      liveUrl: data.liveUrl || '',
+      previewUrl: data.previewUrl || '',
+      cadenceMinutes: data.cadenceMinutes || 180,
+      cadenceWindow: data.cadenceWindow || null,
+      rulesPath: data.rulesPath || '.runmywork/rules.md',
+      rolesEnabled: data.rolesEnabled || { pm: true, shepherd: true, senior_pm: true, builder: true, reviewer: true, senior_dev_mgr: true },
+      autoRunDisabled: !!data.autoRunDisabled,
+      archivedAt: null
     };
   }
 

@@ -49,7 +49,16 @@ function makeSupabase(config) {
       sessions: r.sessions || [], totalMinutes: r.total_minutes || 0,
       blockedReason: r.blocked_reason || '', snoozedUntil: r.snoozed_until ?? null,
       links: r.links || [], tasks: r.tasks || [],
-      aiSuggestion: r.ai_suggestion ?? null, aiRequested: !!r.ai_requested
+      aiSuggestion: r.ai_suggestion ?? null, aiRequested: !!r.ai_requested,
+      targetRepo: r.target_repo || '',
+      liveUrl: r.live_url || '',
+      previewUrl: r.preview_url || '',
+      cadenceMinutes: r.cadence_minutes ?? 180,
+      cadenceWindow: r.cadence_window ?? null,
+      rulesPath: r.rules_path || '.runmywork/rules.md',
+      rolesEnabled: r.roles_enabled || null,
+      autoRunDisabled: !!r.auto_run_disabled,
+      archivedAt: r.archived_at ?? null
     };
   }
 

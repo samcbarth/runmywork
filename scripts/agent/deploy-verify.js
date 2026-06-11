@@ -27,11 +27,25 @@ const { loadConfig } = require('./config');
 const { makeSupabase } = require('./supabase');
 const { sendPush } = require('./notify');
 
-const LIVE_URL       = (process.env.LIVE_URL || 'https://samcbarth.github.io/runmywork').replace(/\/+$/, '');
+const ENV_LIVE_URL   = (process.env.LIVE_URL || 'https://samcbarth.github.io/runmywork').replace(/\/+$/, '');
 const BUILD_ID       = String(process.env.DEPLOY_BUILD_ID || '').trim();
 const TIMEOUT_MS     = parseInt(process.env.DEPLOY_TIMEOUT_MS || '', 10) || 12 * 60 * 1000; // 12 min
 const POLL_MS        = parseInt(process.env.DEPLOY_POLL_MS || '', 10) || 15 * 1000;          // 15 s
-const VERSION_URL    = `${LIVE_URL}/version.json`;
+
+// Per-run live URL: prefer the project's projects.live_url column (Phase 1
+// schema), fall back to env LIVE_URL set by the workflow. Cached per project.
+const _liveUrlCache = new Map();
+async function resolveLiveUrl(sb, projectId) {
+  if (!projectId) return ENV_LIVE_URL;
+  if (_liveUrlCache.has(projectId)) return _liveUrlCache.get(projectId);
+  let url = ENV_LIVE_URL;
+  try {
+    const p = await sb.pullProject(projectId);
+    if (p && p.liveUrl) url = String(p.liveUrl).replace(/\/+$/, '');
+  } catch { /* fall back to env */ }
+  _liveUrlCache.set(projectId, url);
+  return url;
+}
 
 function log(...a) { console.log('[deploy-verify]', ...a); }
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -48,9 +62,10 @@ function readHandoff() {
 // served=true means the URL returned 200 (a deploy target exists, even if it's
 // still showing an old build); build is the reported build id or null. A target
 // with no GitHub Pages at all returns served=false (404 / unreachable).
-async function fetchLiveBuild() {
+async function fetchLiveBuild(liveUrl) {
+  const base = (liveUrl || ENV_LIVE_URL).replace(/\/+$/, '');
   try {
-    const res = await fetch(`${VERSION_URL}?cb=${Date.now()}`, {
+    const res = await fetch(`${base}/version.json?cb=${Date.now()}`, {
       cache: 'no-store',
       headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' }
     });
@@ -63,7 +78,7 @@ async function fetchLiveBuild() {
 // Build the human-readable final report the user reads in the tracker.
 // outcome: 'verified' (live confirmed) | 'no_pages' (pushed; target has no Pages
 // to verify against) | 'stuck' (Pages exists but never showed this build).
-function buildReport({ outcome, handoff }) {
+function buildReport({ outcome, handoff, liveUrl }) {
   const files = (handoff.changedFiles || []).map(f => f.path || f).filter(Boolean);
   const lines = [];
   lines.push(handoff.summary ? handoff.summary.split('\n')[0] : 'Agent run');
@@ -76,7 +91,7 @@ function buildReport({ outcome, handoff }) {
     : outcome === 'no_pages' ? 'pushed (no live site configured on this repo — nothing to deploy to)'
     : 'pushed, deploy not confirmed';
   lines.push(`Deployment: ${deployLine}`);
-  lines.push(`Live URL checked: ${LIVE_URL}`);
+  lines.push(`Live URL checked: ${liveUrl || ENV_LIVE_URL}`);
   const visibleLine = outcome === 'verified' ? 'YES — confirmed live'
     : outcome === 'no_pages' ? 'N/A — this repo has no GitHub Pages site, so there is nothing to verify. The change is committed and pushed.'
     : 'NOT YET — live site did not reflect this build in time';
@@ -89,9 +104,10 @@ const normCrit = (s) => String(s || '').split(/\n\n(?:Evidence|Feedback):/i)[0].
 // Snapshot what the live page ACTUALLY shows right now (title + headings + short
 // status-ish text), so the human reviews the agent's claim against reality, not
 // against the agent's own description of its work.
-async function fetchLiveSnapshot() {
+async function fetchLiveSnapshot(liveUrl) {
+  const base = (liveUrl || ENV_LIVE_URL).replace(/\/+$/, '');
   try {
-    const res = await fetch(`${LIVE_URL}/?cb=${Date.now()}`, { cache: 'no-store', headers: { 'Cache-Control': 'no-cache' } });
+    const res = await fetch(`${base}/?cb=${Date.now()}`, { cache: 'no-store', headers: { 'Cache-Control': 'no-cache' } });
     if (!res.ok) return '';
     const html = await res.text();
     const clean = (s) => String(s || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 90);
@@ -115,7 +131,7 @@ async function fetchLiveSnapshot() {
 // Returns { hasCriteria, filed }. hasCriteria=false means the project has no
 // success criteria at all, so the caller completes the run outright (nothing to
 // review). Idempotent: skips filing if a review is already pending.
-async function ensureCriteriaReview(sb, projectId, criteriaAdvanced, deployReport, visualSummary, runId) {
+async function ensureCriteriaReview(sb, projectId, criteriaAdvanced, deployReport, visualSummary, runId, liveUrl) {
   if (!projectId) return { hasCriteria: false, filed: false };
 
   let rows = [];
@@ -165,8 +181,9 @@ async function ensureCriteriaReview(sb, projectId, criteriaAdvanced, deployRepor
   }));
 
   // What the live page actually shows right now — reality next to the claim.
+  const baseLive = (liveUrl || ENV_LIVE_URL).replace(/\/+$/, '');
   let liveSnapshot = '';
-  try { liveSnapshot = await fetchLiveSnapshot(); } catch { /* best effort */ }
+  try { liveSnapshot = await fetchLiveSnapshot(baseLive); } catch { /* best effort */ }
 
   await sb.createApproval({
     project_id: projectId,
@@ -176,7 +193,7 @@ async function ensureCriteriaReview(sb, projectId, criteriaAdvanced, deployRepor
       visualSummary: String(visualSummary || '').slice(0, 600),
       deployReport: String(deployReport || '').slice(0, 1000),
       liveSnapshot: liveSnapshot.slice(0, 800),
-      liveUrl: LIVE_URL,
+      liveUrl: baseLive,
       runId: runId || null
     },
     rationale: 'Live-verified change is deployed. Review each success criterion and mark which passed and which failed. Failed ones go back to the agent with your feedback.'
@@ -210,11 +227,16 @@ async function main() {
     .filter(r => r && r.runId);
   if (!runs.length) { log('No run ids in handoff — nothing to verify.'); return; }
 
+  // Resolve the project's live URL once per run. All runs in a single workflow
+  // share the same target repo, but each project still owns its own live URL.
+  for (const r of runs) { r.liveUrl = await resolveLiveUrl(sb, r.projectId); }
+  const primaryLiveUrl = runs[0].liveUrl;
+
   // Stage: pushed → deploying
   for (const r of runs) {
     await sb.updateRun(r.runId, { stage: 'pushed',    percent: Math.round((4 / 7) * 100) });
   }
-  log(`Marked ${runs.length} run(s) pushed. Waiting for live deploy of build ${BUILD_ID} at ${VERSION_URL}`);
+  log(`Marked ${runs.length} run(s) pushed. Waiting for live deploy of build ${BUILD_ID} at ${primaryLiveUrl}/version.json`);
   for (const r of runs) {
     await sb.updateRun(r.runId, { stage: 'deploying', percent: Math.round((5 / 7) * 100) });
   }
@@ -231,12 +253,12 @@ async function main() {
   let verified = false;
   let everServed = false;
   while (Date.now() < deadline) {
-    const { served, build } = await fetchLiveBuild();
+    const { served, build } = await fetchLiveBuild(primaryLiveUrl);
     if (served) everServed = true;
     if (build === BUILD_ID) { verified = true; break; }
     // Quick exit when there is plainly no Pages site to verify against.
     if (!everServed && (Date.now() - startedAt) > NOPAGES_GRACE_MS) {
-      log(`No live site responded at ${VERSION_URL} after ${Math.round(NOPAGES_GRACE_MS / 1000)}s — treating the push as the finish line (no Pages on this repo).`);
+      log(`No live site responded at ${primaryLiveUrl}/version.json after ${Math.round(NOPAGES_GRACE_MS / 1000)}s — treating the push as the finish line (no Pages on this repo).`);
       break;
     }
     log(`live build = ${build ?? (everServed ? '(no build field)' : '(unreachable)')} ≠ ${BUILD_ID} — waiting ${POLL_MS / 1000}s…`);
@@ -246,7 +268,7 @@ async function main() {
   // verified  → confirmed live.   no_pages → pushed, no live target to verify.
   // stuck     → a Pages site exists but never showed this build (real failure).
   const outcome = verified ? 'verified' : (!everServed ? 'no_pages' : 'stuck');
-  const report = buildReport({ outcome, handoff });
+  const report = buildReport({ outcome, handoff, liveUrl: primaryLiveUrl });
   const shipped = outcome !== 'stuck';   // verified live OR pushed with no live target
 
   if (shipped) {
@@ -259,7 +281,7 @@ async function main() {
       // success criteria first. File the review and hold at awaiting_review.
       // Only a project with NO criteria completes outright.
       let review = { hasCriteria: false, filed: false };
-      try { review = await ensureCriteriaReview(sb, r.projectId, r.criteriaAdvanced, report, handoff.visualSummary, r.runId); }
+      try { review = await ensureCriteriaReview(sb, r.projectId, r.criteriaAdvanced, report, handoff.visualSummary, r.runId, r.liveUrl); }
       catch (e) { log(`   (criteria review not filed: ${e.message})`); }
 
       let title = 'A project';

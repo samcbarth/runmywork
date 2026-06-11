@@ -289,7 +289,16 @@ const Sync = (() => {
       blockedReason: r.blocked_reason || '', snoozedUntil: r.snoozed_until ?? null,
       links: r.links || [], tasks: r.tasks || [],
       summary: r.summary || '',
-      aiSuggestion: r.ai_suggestion ?? null, aiRequested: !!r.ai_requested
+      aiSuggestion: r.ai_suggestion ?? null, aiRequested: !!r.ai_requested,
+      targetRepo: r.target_repo || '',
+      liveUrl: r.live_url || '',
+      previewUrl: r.preview_url || '',
+      cadenceMinutes: r.cadence_minutes ?? 180,
+      cadenceWindow: r.cadence_window ?? null,
+      rulesPath: r.rules_path || '.runmywork/rules.md',
+      rolesEnabled: r.roles_enabled || { pm: true, shepherd: true, senior_pm: true, builder: true, reviewer: true, senior_dev_mgr: true },
+      autoRunDisabled: !!r.auto_run_disabled,
+      archivedAt: r.archived_at ?? null
     };
   }
   function projectToRow(p) {
@@ -302,7 +311,16 @@ const Sync = (() => {
       sessions: p.sessions || [], total_minutes: p.totalMinutes || 0,
       blocked_reason: p.blockedReason || '', snoozed_until: p.snoozedUntil ?? null,
       links: p.links || [], tasks: p.tasks || [],
-      ai_suggestion: p.aiSuggestion ?? null, ai_requested: !!p.aiRequested
+      ai_suggestion: p.aiSuggestion ?? null, ai_requested: !!p.aiRequested,
+      target_repo: p.targetRepo || null,
+      live_url: p.liveUrl || null,
+      preview_url: p.previewUrl || null,
+      cadence_minutes: p.cadenceMinutes ?? 180,
+      cadence_window: p.cadenceWindow ?? null,
+      rules_path: p.rulesPath || '.runmywork/rules.md',
+      roles_enabled: p.rolesEnabled || null,
+      auto_run_disabled: !!p.autoRunDisabled,
+      archived_at: p.archivedAt ?? null
     };
   }
 

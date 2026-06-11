@@ -61,6 +61,47 @@ Views.ProjectForm = (() => {
         <input class="form-input" id="pf-note" type="text" placeholder="Optional context...">
       </div>
 
+      <div class="form-section-divider" style="margin-top:8px;border-top:1px solid var(--border);padding-top:12px;">
+        <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--text-2);margin-bottom:8px;">Agent configuration</div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="pf-target-repo">GitHub repo <span class="optional">(owner/name — where the agent commits)</span></label>
+        <input class="form-input" id="pf-target-repo" type="text"
+          placeholder="e.g. samcbarth/testingsite"
+          value="${Models.escapeHtml(project ? (project.targetRepo || '') : '')}" autocomplete="off">
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="pf-live-url">Live URL <span class="optional">(canonical site for verification)</span></label>
+        <input class="form-input" id="pf-live-url" type="url"
+          placeholder="https://example.com"
+          value="${Models.escapeHtml(project ? (project.liveUrl || '') : '')}" autocomplete="off">
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="pf-preview-url">Preview URL <span class="optional">(optional — for visual checks)</span></label>
+        <input class="form-input" id="pf-preview-url" type="url"
+          placeholder="https://preview.example.com"
+          value="${Models.escapeHtml(project ? (project.previewUrl || '') : '')}" autocomplete="off">
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label" for="pf-cadence">Run cadence <span class="optional">(minutes between runs)</span></label>
+          <input class="form-input" id="pf-cadence" type="number" min="15" max="10080" step="15"
+            placeholder="180"
+            value="${project && project.cadenceMinutes ? project.cadenceMinutes : 180}">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="pf-auto-disabled">Auto-run</label>
+          <select class="form-select" id="pf-auto-disabled">
+            <option value="0" ${(!project || !project.autoRunDisabled) ? 'selected' : ''}>Enabled</option>
+            <option value="1" ${project && project.autoRunDisabled ? 'selected' : ''}>Paused (manual only)</option>
+          </select>
+        </div>
+      </div>
+
       <div class="modal-footer" style="padding: 0; border: none; margin-top: 8px;">
         ${isEdit ? `<button class="btn btn-danger btn-ghost" onclick="Views.ProjectForm.confirmDelete('${project.id}')">Delete</button>` : ''}
         <div style="flex:1"></div>
@@ -108,6 +149,13 @@ Views.ProjectForm = (() => {
 
     const tags = tagStr.split(',').map(t => t.trim()).filter(Boolean);
 
+    const targetRepo = (document.getElementById('pf-target-repo').value || '').trim().toLowerCase();
+    const liveUrl    = (document.getElementById('pf-live-url').value || '').trim();
+    const previewUrl = (document.getElementById('pf-preview-url').value || '').trim();
+    const cadence    = parseInt(document.getElementById('pf-cadence').value, 10);
+    const cadenceMinutes = Number.isFinite(cadence) && cadence >= 15 ? cadence : 180;
+    const autoRunDisabled = document.getElementById('pf-auto-disabled').value === '1';
+
     if (existing) {
       const prevStatus = existing.status;
       existing.title       = title;
@@ -116,6 +164,11 @@ Views.ProjectForm = (() => {
       existing.priority    = priority;
       existing.tags        = tags;
       existing.blockedReason = status === 'blocked' ? blocked : '';
+      existing.targetRepo  = targetRepo;
+      existing.liveUrl     = liveUrl;
+      existing.previewUrl  = previewUrl;
+      existing.cadenceMinutes = cadenceMinutes;
+      existing.autoRunDisabled = autoRunDisabled;
 
       if (status !== prevStatus) {
         Models.appendStatus(existing, status, note);
@@ -127,7 +180,10 @@ Views.ProjectForm = (() => {
         Notifications.ping(title, blocked ? `Blocked — ${blocked}` : 'Marked as blocked', 'high');
       }
     } else {
-      const project = Models.createProject({ title, summary, description: desc, status, priority, tags, note, blockedReason: blocked });
+      const project = Models.createProject({
+        title, summary, description: desc, status, priority, tags, note, blockedReason: blocked,
+        targetRepo, liveUrl, previewUrl, cadenceMinutes, autoRunDisabled
+      });
       Store.saveProject(project);
       if (status === 'blocked') {
         Notifications.ping(title, blocked ? `Blocked — ${blocked}` : 'Marked as blocked', 'high');
